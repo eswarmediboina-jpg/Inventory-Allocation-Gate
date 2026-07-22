@@ -19,13 +19,14 @@
   <div class="card">
     <h1>Switch Request Result</h1>
     {% if uniware_success %}
-      <div class="ok">✓ Switched to main facility successfully</div>
+      <div class="ok">✓ Switched to {{ target_facility }} successfully</div>
     {% else %}
       <div class="fail">✗ {{ uniware_message }}</div>
     {% endif %}
     <dl>
       <dt>Sale Order</dt><dd>{{ sale_order_code }}</dd>
       <dt>Item Codes</dt><dd>{{ item_codes | join(', ') }}</dd>
+      <dt>Destination</dt><dd>{{ target_facility }}{% if direction == 'commit' %} — committed inventory (Available → Blocked){% elif direction == 'release' %} — released inventory (Blocked → Available){% endif %}</dd>
       <dt>Channel</dt><dd>{{ channel }}</dd>
       <dt>Rule Check</dt><dd>{{ rule_result }}</dd>
     </dl>

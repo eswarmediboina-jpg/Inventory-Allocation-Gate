@@ -15,12 +15,18 @@
   button:hover { background:#1f2937; }
   .hint { font-size:11px; color:#9ca3af; margin-top:4px; }
   .badge { display:inline-block; background:#fef3c7; color:#92400e; font-size:11px; font-weight:600; padding:3px 8px; border-radius:6px; margin-bottom:14px; }
+  .who { display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#6b7280; margin-bottom:12px; }
+  .who a { color:#4f46e5; text-decoration:none; }
 </style>
 </head>
 <body>
   <div class="card">
+    <div class="who">
+      <span>Signed in as <strong>{{ username }}</strong></span>
+      <a href="{{ url_for('logout') }}">Log out</a>
+    </div>
     <span class="badge">PHASE 0 · NO RULES ENFORCED</span>
-    <h1>Switch Order to Main Facility</h1>
+    <h1>Switch Order Facility</h1>
     <p class="sub">Use this instead of switching facility directly in Uniware. Every request is logged.</p>
     <form action="/submit" method="post">
       <label for="sale_order_code">Sale Order Code</label>
@@ -30,6 +36,15 @@
       <input type="text" id="item_codes" name="item_codes" required placeholder="comma-separated, e.g. ITEM123,ITEM124">
       <div class="hint">Sale order item codes to move, separated by commas.</div>
 
+      <label for="target_facility">Destination Facility</label>
+      <select id="target_facility" name="target_facility" required>
+        <option value="" disabled selected>Select destination</option>
+        {% for f in facilities %}
+        <option value="{{ f.code }}">{{ f.label }}</option>
+        {% endfor %}
+      </select>
+      <div class="hint">To main = commit stock. Back to dummy = release stock.</div>
+
       <label for="channel">Channel</label>
       <select id="channel" name="channel" required>
         <option value="" disabled selected>Select channel</option>
@@ -38,10 +53,7 @@
         {% endfor %}
       </select>
 
-      <label for="requested_by">Your Name</label>
-      <input type="text" id="requested_by" name="requested_by" required placeholder="e.g. Swarda">
-
-      <button type="submit">Switch to Main Facility</button>
+      <button type="submit">Switch Facility</button>
     </form>
   </div>
 </body>

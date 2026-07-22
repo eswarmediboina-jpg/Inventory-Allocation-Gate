@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Log in · Facility Switch Gate</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#f6f7f9; margin:0; padding:40px 16px; }
+  .card { max-width: 380px; margin: 40px auto 0; background:#fff; border-radius:12px; padding:28px 28px 32px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+  h1 { font-size: 19px; margin: 0 0 4px; color:#1a1a1a; }
+  p.sub { color:#6b7280; font-size:13px; margin:0 0 20px; }
+  label { display:block; font-size:13px; font-weight:600; color:#374151; margin:16px 0 6px; }
+  input { width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; box-sizing:border-box; }
+  input:focus { outline:none; border-color:#4f46e5; }
+  button { margin-top:24px; width:100%; padding:12px; background:#111827; color:#fff; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
+  button:hover { background:#1f2937; }
+  .err { color:#991b1b; background:#fee2e2; padding:10px 14px; border-radius:8px; font-size:13px; margin-bottom:6px; }
+  .note { font-size:11px; color:#9ca3af; margin-top:18px; line-height:1.5; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Facility Switch Gate</h1>
+    <p class="sub">Log in with your own Uniware account.</p>
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+    <form action="{{ url_for('login') }}" method="post" autocomplete="off">
+      <label for="username">Uniware Username</label>
+      <input type="text" id="username" name="username" required autofocus placeholder="you@zouk.co.in">
+
+      <label for="password">Uniware Password</label>
+      <input type="password" id="password" name="password" required placeholder="••••••••">
+
+      <button type="submit">Log in</button>
+    </form>
+    <p class="note">Your password is used only to log in to Uniware and is never stored. Only a temporary access token is kept for your session.</p>
+  </div>
+</body>
+</html>
