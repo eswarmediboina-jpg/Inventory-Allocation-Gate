@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Facility Switch Gate</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#f6f7f9; margin:0; padding:40px 16px; }
+  .card { max-width: 480px; margin: 0 auto; background:#fff; border-radius:12px; padding:28px 28px 32px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+  h1 { font-size: 19px; margin: 0 0 4px; color:#1a1a1a; }
+  p.sub { color:#6b7280; font-size:13px; margin:0 0 24px; }
+  label { display:block; font-size:13px; font-weight:600; color:#374151; margin:16px 0 6px; }
+  input, select { width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; box-sizing:border-box; }
+  input:focus, select:focus { outline:none; border-color:#4f46e5; }
+  button { margin-top:24px; width:100%; padding:12px; background:#111827; color:#fff; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
+  button:hover { background:#1f2937; }
+  .hint { font-size:11px; color:#9ca3af; margin-top:4px; }
+  .badge { display:inline-block; background:#fef3c7; color:#92400e; font-size:11px; font-weight:600; padding:3px 8px; border-radius:6px; margin-bottom:14px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <span class="badge">PHASE 0 · NO RULES ENFORCED</span>
+    <h1>Switch Order to Main Facility</h1>
+    <p class="sub">Use this instead of switching facility directly in Uniware. Every request is logged.</p>
+    <form action="/submit" method="post">
+      <label for="sale_order_code">Sale Order Code</label>
+      <input type="text" id="sale_order_code" name="sale_order_code" required placeholder="e.g. SO-1029384">
+
+      <label for="item_codes">Item Codes</label>
+      <input type="text" id="item_codes" name="item_codes" required placeholder="comma-separated, e.g. ITEM123,ITEM124">
+      <div class="hint">Sale order item codes to move, separated by commas.</div>
+
+      <label for="channel">Channel</label>
+      <select id="channel" name="channel" required>
+        <option value="" disabled selected>Select channel</option>
+        {% for c in channels %}
+        <option value="{{ c }}">{{ c }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="requested_by">Your Name</label>
+      <input type="text" id="requested_by" name="requested_by" required placeholder="e.g. Swarda">
+
+      <button type="submit">Switch to Main Facility</button>
+    </form>
+  </div>
+</body>
+</html>
