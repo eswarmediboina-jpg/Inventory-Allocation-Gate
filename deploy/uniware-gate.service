@@ -1,0 +1,25 @@
+# systemd unit for the Facility Switch Gate (gunicorn).
+# Install:  sudo cp deploy/uniware-gate.service /etc/systemd/system/
+#           sudo systemctl daemon-reload
+#           sudo systemctl enable --now uniware-gate
+# Logs:     journalctl -u uniware-gate -f
+#
+# Replace the placeholders (<USER>, paths) to match your VM before installing.
+
+[Unit]
+Description=Uniware Facility Switch Gate
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/uniware_gate
+# EnvironmentFile holds the secrets/config (see deploy/env.example).
+EnvironmentFile=/home/ubuntu/uniware_gate/gate.env
+# 2 workers is plenty for a small internal tool. Binds to localhost only —
+# Caddy (the HTTPS reverse proxy) is the only thing that talks to it.
+ExecStart=/home/ubuntu/uniware_gate/.venv/bin/gunicorn --workers 2 --bind 127.0.0.1:8000 --timeout 60 app:app
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

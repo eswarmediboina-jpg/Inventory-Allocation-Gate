@@ -23,6 +23,7 @@ SECURITY: on localhost this is fine over http. If you deploy this anywhere
 the team reaches over a network, it MUST be served over HTTPS — otherwise
 usernames/passwords travel in plaintext. See the deployment note at bottom.
 """
+import os
 import time
 import secrets
 
@@ -39,21 +40,25 @@ from uniware_client import (
     login as uniware_login,
     refresh as uniware_refresh,
     switch_facility,
+    get_sale_order_items,
+    search_sale_orders,
     UniwareConfigError,
     UniwareAuthError,
 )
 from bq_logger import log_switch_event
 
 app = Flask(__name__)
-# Random per-process key: no secret is hardcoded or stored. Trade-off: a
-# server restart invalidates sessions, so everyone logs in again. Fine for
-# an internal tool.
-app.secret_key = secrets.token_hex(32)
+# Session signing key. On a shared/multi-worker deployment this MUST be a
+# fixed value shared across workers (set FLASK_SECRET_KEY in the environment),
+# otherwise logins break as requests hit different workers. Falls back to a
+# random per-process key for a quick single-user local run.
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    # Set to True once you serve over HTTPS (recommended for any real deploy).
-    SESSION_COOKIE_SECURE=False,
+    # MUST be true in any real (HTTPS) deployment so the session cookie is
+    # never sent over plain HTTP. Set SESSION_COOKIE_SECURE=true in the env.
+    SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true",
 )
 
 # Channels — hardcoded (used only to label each log entry with the channel).
@@ -146,6 +151,7 @@ def login():
         except UniwareAuthError as e:
             return render_template("login.html", error=str(e))
         except Exception as e:
+            print(f"[login] could not reach Uniware: {type(e).__name__}: {e}")
             return render_template("login.html", error=f"Could not reach Uniware: {e}")
         finally:
             # Drop the password reference as soon as we're done with it.
@@ -161,82 +167,135 @@ def logout():
     return redirect(url_for("login"))
 
 
+def _iso_start(d):
+    return f"{d}T00:00:00.000Z" if d else None
+
+
+def _iso_end(d):
+    return f"{d}T23:59:59.000Z" if d else None
+
+
 @app.route("/", methods=["GET"])
 def index():
-    if not _current_token():
-        return redirect(url_for("login"))
-    return render_template(
-        "index.html",
-        channels=CHANNELS,
-        facilities=available_facilities(),
-        username=session.get("username", ""),
-    )
-
-
-@app.route("/submit", methods=["POST"])
-def submit():
+    """Browse orders in the configured facilities; pick some to switch."""
     token = _current_token()
     if not token:
         return redirect(url_for("login"))
 
-    sale_order_code = request.form.get("sale_order_code", "").strip()
-    item_codes_raw = request.form.get("item_codes", "").strip()
-    channel = request.form.get("channel", "").strip()
-    target_facility = request.form.get("target_facility", "").strip()
-    # The person is whoever is logged in — not a free-text field.
-    requested_by = session.get("username", "")
+    filters = {
+        "channel": request.args.get("channel", "").strip(),
+        "status": request.args.get("status", "").strip(),
+        "from_date": request.args.get("from_date", "").strip(),
+        "to_date": request.args.get("to_date", "").strip(),
+        "order_code": request.args.get("order_code", "").strip(),
+        "facility": request.args.get("facility", "").strip(),
+    }
 
-    item_codes = [c.strip() for c in item_codes_raw.split(",") if c.strip()]
+    all_codes = [f["code"] for f in FACILITIES]
+    which = [filters["facility"]] if filters["facility"] in all_codes else all_codes
 
-    # Only allow switching to a facility we've explicitly configured.
-    facility_by_code = {f["code"]: f for f in available_facilities()}
-    chosen = facility_by_code.get(target_facility)
-    direction = chosen["direction"] if chosen else ""
-
-    rule_result, rule_reason = check_rules(channel, item_codes, requested_by)
-
-    uniware_success = False
-    uniware_message = ""
-
-    if not chosen:
-        uniware_message = "Invalid or missing destination facility. Pick one from the list."
-    elif rule_result in ("ALLOWED_NO_RULES", "ALLOW"):
-        try:
-            result = switch_facility(sale_order_code, item_codes, target_facility, token)
-            uniware_success = bool(result.get("successful", False))
-            uniware_message = result.get("message", "") or "OK"
-        except UniwareConfigError as e:
-            uniware_message = f"Config error: {e}"
-        except UniwareAuthError as e:
-            uniware_message = f"Auth problem: {e}"
-        except Exception as e:
-            uniware_message = f"Uniware call failed: {e}"
-    else:
-        uniware_message = f"Blocked: {rule_reason}"
-
-    log_switch_event(
-        sale_order_code=sale_order_code,
-        item_codes=item_codes,
-        source_channel=channel,
-        target_facility=target_facility,
-        requested_by=requested_by,
-        rule_check_result=rule_result,
-        rule_check_reason=rule_reason,
-        uniware_success=uniware_success,
-        uniware_message=uniware_message,
-    )
+    orders = []
+    search_error = None
+    try:
+        for fac in which:
+            res = search_sale_orders(
+                token,
+                facility_code=fac,
+                channel=filters["channel"] or None,
+                status=filters["status"] or None,
+                from_date=_iso_start(filters["from_date"]),
+                to_date=_iso_end(filters["to_date"]),
+                display_order_code=filters["order_code"] or None,
+            )
+            for el in res["elements"]:
+                el["_facility"] = fac
+                orders.append(el)
+    except Exception as e:
+        search_error = str(e)
 
     return render_template(
-        "result.html",
-        sale_order_code=sale_order_code,
-        item_codes=item_codes,
-        channel=channel,
-        target_facility=target_facility,
-        direction=direction,
-        rule_result=rule_result,
-        uniware_success=uniware_success,
-        uniware_message=uniware_message,
+        "index.html",
+        username=session.get("username", ""),
+        channels=CHANNELS,
+        facilities=FACILITIES,
+        orders=orders,
+        search_error=search_error,
+        filters=filters,
     )
+
+
+@app.route("/switch", methods=["POST"])
+def switch_selected():
+    """Switch each selected whole order to the chosen destination facility."""
+    token = _current_token()
+    if not token:
+        return redirect(url_for("login"))
+
+    target_facility = request.form.get("target_facility", "").strip()
+    selected = request.form.getlist("selected")  # each = "orderCode|currentFacility"
+    requested_by = session.get("username", "")
+
+    facility_by_code = {f["code"]: f for f in FACILITIES}
+    chosen = facility_by_code.get(target_facility)
+
+    results = []
+
+    if not chosen:
+        results.append({"order": "—", "ok": False, "message": "Pick a valid destination facility.", "count": 0})
+        return render_template("result.html", results=results, target_facility=target_facility)
+    if not selected:
+        results.append({"order": "—", "ok": False, "message": "No orders were selected.", "count": 0})
+        return render_template("result.html", results=results, target_facility=target_facility)
+
+    for entry in selected:
+        order_code, _, current_fac = entry.partition("|")
+        order_code = order_code.strip()
+
+        # Already at the destination — nothing to do.
+        if current_fac == target_facility:
+            results.append({
+                "order": order_code, "ok": False, "count": 0,
+                "message": f"Already in {target_facility}; skipped.",
+            })
+            continue
+
+        rule_result, rule_reason = check_rules("", [], requested_by)
+        ok = False
+        msg = ""
+        item_codes = []
+
+        if rule_result in ("ALLOWED_NO_RULES", "ALLOW"):
+            try:
+                item_codes = get_sale_order_items(order_code, token, facility_code=current_fac)
+                res = switch_facility(order_code, item_codes, target_facility, token)
+                ok = bool(res.get("successful", False))
+                msg = res.get("message", "") or ("OK" if ok else "Failed")
+                if not ok and res.get("errors"):
+                    msg = f"{msg}: {res.get('errors')}"
+            except UniwareConfigError as e:
+                msg = f"Config error: {e}"
+            except UniwareAuthError as e:
+                msg = f"Auth problem: {e}"
+            except Exception as e:
+                msg = f"Uniware call failed: {e}"
+        else:
+            msg = f"Blocked: {rule_reason}"
+
+        results.append({"order": order_code, "ok": ok, "message": msg, "count": len(item_codes)})
+
+        log_switch_event(
+            sale_order_code=order_code,
+            item_codes=item_codes,
+            source_channel="",
+            target_facility=target_facility,
+            requested_by=requested_by,
+            rule_check_result=rule_result,
+            rule_check_reason=rule_reason,
+            uniware_success=ok,
+            uniware_message=msg,
+        )
+
+    return render_template("result.html", results=results, target_facility=target_facility)
 
 
 if __name__ == "__main__":

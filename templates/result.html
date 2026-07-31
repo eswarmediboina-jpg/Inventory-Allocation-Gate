@@ -4,33 +4,44 @@
 <meta charset="UTF-8">
 <title>Switch Result</title>
 <style>
-  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#f6f7f9; margin:0; padding:40px 16px; }
-  .card { max-width: 480px; margin: 0 auto; background:#fff; border-radius:12px; padding:28px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
-  h1 { font-size: 19px; margin: 0 0 16px; }
-  .ok { color:#065f46; background:#d1fae5; padding:10px 14px; border-radius:8px; font-weight:600; font-size:14px; }
-  .fail { color:#991b1b; background:#fee2e2; padding:10px 14px; border-radius:8px; font-weight:600; font-size:14px; }
-  dl { margin-top:20px; font-size:14px; }
-  dt { color:#6b7280; margin-top:10px; }
-  dd { margin:2px 0 0; color:#111827; font-weight:500; }
-  a.back { display:inline-block; margin-top:24px; font-size:14px; color:#4f46e5; text-decoration:none; }
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#f6f7f9; margin:0; padding:40px 16px; color:#111827; }
+  .card { max-width: 640px; margin: 0 auto; background:#fff; border-radius:12px; padding:28px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  p.sub { color:#6b7280; font-size:13px; margin:0 0 20px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid #eef0f3; vertical-align:top; }
+  th { font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:#6b7280; }
+  .ok { color:#065f46; font-weight:600; }
+  .fail { color:#991b1b; font-weight:600; }
+  a.back { display:inline-block; margin-top:22px; font-size:14px; color:#4f46e5; text-decoration:none; }
+  .summary { font-size:13px; color:#374151; margin-bottom:14px; }
 </style>
 </head>
 <body>
   <div class="card">
-    <h1>Switch Request Result</h1>
-    {% if uniware_success %}
-      <div class="ok">✓ Switched to {{ target_facility }} successfully</div>
-    {% else %}
-      <div class="fail">✗ {{ uniware_message }}</div>
-    {% endif %}
-    <dl>
-      <dt>Sale Order</dt><dd>{{ sale_order_code }}</dd>
-      <dt>Item Codes</dt><dd>{{ item_codes | join(', ') }}</dd>
-      <dt>Destination</dt><dd>{{ target_facility }}{% if direction == 'commit' %} — committed inventory (Available → Blocked){% elif direction == 'release' %} — released inventory (Blocked → Available){% endif %}</dd>
-      <dt>Channel</dt><dd>{{ channel }}</dd>
-      <dt>Rule Check</dt><dd>{{ rule_result }}</dd>
-    </dl>
-    <a class="back" href="/">← Switch another order</a>
+    <h1>Switch Result</h1>
+    <p class="sub">Destination: <strong>{{ target_facility }}</strong></p>
+
+    {% set ok_count = results | selectattr('ok') | list | length %}
+    <div class="summary">{{ ok_count }} of {{ results|length }} switched successfully.</div>
+
+    <table>
+      <thead>
+        <tr><th>Order</th><th>Result</th><th>Items</th><th>Message</th></tr>
+      </thead>
+      <tbody>
+        {% for r in results %}
+        <tr>
+          <td>{{ r.order }}</td>
+          <td>{% if r.ok %}<span class="ok">✓ OK</span>{% else %}<span class="fail">✗ Fail</span>{% endif %}</td>
+          <td>{{ r.count }}</td>
+          <td>{{ r.message }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <a class="back" href="{{ url_for('index') }}">← Back to orders</a>
   </div>
 </body>
 </html>

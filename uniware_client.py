@@ -13,10 +13,20 @@ never written to disk — it exists only for the duration of the login call.
 Nothing here reads environment variables. The tenant URL is hardcoded
 below; change it here if the tenant ever changes.
 """
+import socket
+
 import requests
+import urllib3.util.connection as _urllib3_conn
+
+# Force ALL outbound HTTP from this module over IPv4. This machine (esp. on
+# a mobile hotspot) prefers IPv6, but Uniware's API IP-whitelist is keyed to
+# our public IPv4 address — and the IPv6 "temporary" address rotates every
+# few hours anyway. Pinning to IPv4 makes the source IP Uniware sees stable
+# and matches the whitelisted address.
+_urllib3_conn.allowed_gai_family = lambda: socket.AF_INET
 
 # Hardcoded Uniware tenant. No .env needed.
-UNIWARE_BASE_URL = "https://zouk.unicommerce.com"
+UNIWARE_BASE_URL = "https://zoukst.unicommerce.com"
 
 # Fixed by Uniware's OAuth docs.
 _OAUTH_CLIENT_ID = "my-trusted-client"
@@ -71,17 +81,127 @@ def refresh(refresh_token: str) -> dict:
 
 def _parse_token_response(resp: requests.Response, what: str) -> dict:
     if resp.status_code != 200:
+        body = (resp.text or "").strip()[:400]
+        # Server-side diagnostic (local log only; contains no password).
+        print(f"[uniware auth] {what} -> HTTP {resp.status_code}: {body}")
         raise UniwareAuthError(
-            f"Uniware {what} failed (HTTP {resp.status_code}). "
-            f"Check your username / password."
+            f"{what} failed — Uniware returned HTTP {resp.status_code}. {body}"
         )
     try:
         data = resp.json()
     except ValueError:
+        print(f"[uniware auth] {what}: non-JSON response: {(resp.text or '')[:400]}")
         raise UniwareAuthError(f"Uniware {what}: response was not JSON.")
     if not data.get("access_token"):
+        print(f"[uniware auth] {what}: no access_token; keys={list(data.keys())}")
         raise UniwareAuthError(f"Uniware {what}: no access_token in response.")
     return data
+
+
+def search_sale_orders(
+    access_token: str,
+    facility_code: str,
+    channel: str = None,
+    status: str = None,
+    from_date: str = None,
+    to_date: str = None,
+    display_order_code: str = None,
+    display_start: int = 0,
+    display_length: int = 50,
+) -> dict:
+    """
+    Search sale orders in one facility via Uniware's Search Sale Order API:
+      POST /services/rest/v1/oms/saleOrder/search
+
+    Returns {"elements": [...], "totalRecords": int}. Each element has
+    code, displayOrderCode, channel, displayOrderDateTime, status, created.
+    Only non-empty filters are sent, so blanks mean "no filter".
+    """
+    if not access_token:
+        raise UniwareAuthError("Not logged in. Please log in again.")
+
+    body = {
+        "facilityCodes": [facility_code] if facility_code else None,
+        "channel": channel or None,
+        "status": status or None,
+        "fromDate": from_date or None,
+        "toDate": to_date or None,
+        "displayOrderCode": display_order_code or None,
+        "searchOptions": {
+            "displayStart": display_start,
+            "displayLength": display_length,
+            "getCount": True,
+        },
+    }
+    # Drop keys that are None so we don't over-filter.
+    body = {k: v for k, v in body.items() if v is not None}
+
+    url = f"{UNIWARE_BASE_URL}/services/rest/v1/oms/saleOrder/search"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"bearer {access_token}",
+    }
+    # Most Uniware REST endpoints require the Facility header for context,
+    # even where the docs mark it optional. Send the facility being searched.
+    if facility_code:
+        headers["Facility"] = facility_code
+    resp = requests.post(url, headers=headers, json=body, timeout=30)
+    if resp.status_code != 200:
+        raise UniwareConfigError(
+            f"Order search failed (HTTP {resp.status_code}): {(resp.text or '')[:300]}"
+        )
+    data = resp.json()
+    if data.get("successful") is False:
+        raise UniwareConfigError(
+            f"Uniware search error: {data.get('errors') or data.get('message')}"
+        )
+    return {
+        "elements": data.get("elements") or [],
+        "totalRecords": data.get("totalRecords", 0),
+    }
+
+
+def get_sale_order_items(sale_order_code: str, access_token: str, facility_code: str = None) -> list:
+    """
+    Fetch every sale-order-item CODE for a given order, used to switch a
+    WHOLE order. Pass the facility the order currently lives in.
+
+    Uses Uniware's Get Sale Order API:
+      POST /services/rest/v1/oms/saleorder/get  body {"code": <order>}
+    and reads saleOrderDTO.saleOrderItems[].code.
+    """
+    if not access_token:
+        raise UniwareAuthError("Not logged in. Please log in again.")
+    if not sale_order_code:
+        raise UniwareConfigError("No sale order code provided.")
+
+    url = f"{UNIWARE_BASE_URL}/services/rest/v1/oms/saleorder/get"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"bearer {access_token}",
+    }
+    if facility_code:
+        headers["Facility"] = facility_code
+    resp = requests.post(url, headers=headers, json={"code": sale_order_code}, timeout=30)
+    if resp.status_code != 200:
+        raise UniwareConfigError(
+            f"Could not fetch order {sale_order_code} "
+            f"(HTTP {resp.status_code}): {(resp.text or '')[:300]}"
+        )
+    data = resp.json()
+    if data.get("successful") is False:
+        raise UniwareConfigError(
+            f"Uniware could not return order {sale_order_code}: "
+            f"{data.get('errors') or data.get('message')}"
+        )
+    dto = data.get("saleOrderDTO") or {}
+    items = dto.get("saleOrderItems") or []
+    codes = [it.get("code") for it in items if it.get("code")]
+    if not codes:
+        raise UniwareConfigError(
+            f"No items found on order {sale_order_code}. Check the order code."
+        )
+    return codes
 
 
 def switch_facility(

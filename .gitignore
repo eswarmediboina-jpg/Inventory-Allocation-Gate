@@ -3,6 +3,11 @@
 .env
 .env.*
 !.env.example
+# Server env file (holds FLASK_SECRET_KEY etc.). The .example IS committed.
+gate.env
+!gate.env.example
+# The BigQuery service-account key placed on the server.
+sa.json
 
 # --- Google / GCP service-account key files ---
 # Broad safety net for credential JSON keys. .env.example is not JSON,

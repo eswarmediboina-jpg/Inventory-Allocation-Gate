@@ -1,0 +1,11 @@
+# Caddy config — automatic HTTPS (Let's Encrypt) + reverse proxy to gunicorn.
+# Install: sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+#          (edit the domain first) then: sudo systemctl reload caddy
+#
+# Replace gate.zouk.co.in with your real subdomain. Caddy will fetch and
+# renew the TLS certificate automatically once the subdomain's DNS points
+# at this server's public IP.
+
+gate.zouk.co.in {
+    reverse_proxy 127.0.0.1:8000
+}

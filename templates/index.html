@@ -4,57 +4,147 @@
 <meta charset="UTF-8">
 <title>Facility Switch Gate</title>
 <style>
-  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#f6f7f9; margin:0; padding:40px 16px; }
-  .card { max-width: 480px; margin: 0 auto; background:#fff; border-radius:12px; padding:28px 28px 32px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
-  h1 { font-size: 19px; margin: 0 0 4px; color:#1a1a1a; }
-  p.sub { color:#6b7280; font-size:13px; margin:0 0 24px; }
-  label { display:block; font-size:13px; font-weight:600; color:#374151; margin:16px 0 6px; }
-  input, select { width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; box-sizing:border-box; }
-  input:focus, select:focus { outline:none; border-color:#4f46e5; }
-  button { margin-top:24px; width:100%; padding:12px; background:#111827; color:#fff; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
-  button:hover { background:#1f2937; }
-  .hint { font-size:11px; color:#9ca3af; margin-top:4px; }
-  .badge { display:inline-block; background:#fef3c7; color:#92400e; font-size:11px; font-weight:600; padding:3px 8px; border-radius:6px; margin-bottom:14px; }
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#f6f7f9; margin:0; padding:28px 16px 60px; color:#111827; }
+  .wrap { max-width: 1040px; margin: 0 auto; }
   .who { display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#6b7280; margin-bottom:12px; }
   .who a { color:#4f46e5; text-decoration:none; }
+  .badge { display:inline-block; background:#fef3c7; color:#92400e; font-size:11px; font-weight:600; padding:3px 8px; border-radius:6px; }
+  h1 { font-size: 20px; margin: 8px 0 2px; }
+  p.sub { color:#6b7280; font-size:13px; margin:0 0 20px; }
+  .panel { background:#fff; border-radius:12px; padding:18px 20px; box-shadow:0 1px 3px rgba(0,0,0,0.08); margin-bottom:18px; }
+  .filters { display:grid; grid-template-columns: repeat(6, 1fr); gap:10px 12px; align-items:end; }
+  label { display:block; font-size:11px; font-weight:600; color:#374151; margin:0 0 4px; }
+  input, select { width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px; font-size:13px; box-sizing:border-box; }
+  input:focus, select:focus { outline:none; border-color:#4f46e5; }
+  .filters .actions { grid-column: span 6; display:flex; gap:10px; margin-top:4px; }
+  button { padding:9px 16px; background:#111827; color:#fff; border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+  button:hover { background:#1f2937; }
+  a.reset { align-self:center; font-size:12px; color:#6b7280; text-decoration:none; }
+  .err { color:#991b1b; background:#fee2e2; padding:10px 14px; border-radius:8px; font-size:13px; margin-bottom:16px; white-space:pre-wrap; }
+  .switchbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .switchbar select { width:auto; min-width:340px; }
+  .count { font-size:12px; color:#6b7280; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid #eef0f3; }
+  th { font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:#6b7280; }
+  tr:hover td { background:#fafbfc; }
+  .fac { font-size:11px; font-weight:600; padding:2px 7px; border-radius:6px; }
+  .fac.zoukst { background:#dbeafe; color:#1e40af; }
+  .fac.saleorderswitch { background:#e5e7eb; color:#374151; }
+  .empty { text-align:center; color:#9ca3af; padding:28px; font-size:14px; }
+  code { font-size:12px; color:#6b7280; }
 </style>
 </head>
 <body>
-  <div class="card">
-    <div class="who">
-      <span>Signed in as <strong>{{ username }}</strong></span>
-      <a href="{{ url_for('logout') }}">Log out</a>
-    </div>
-    <span class="badge">PHASE 0 · NO RULES ENFORCED</span>
-    <h1>Switch Order Facility</h1>
-    <p class="sub">Use this instead of switching facility directly in Uniware. Every request is logged.</p>
-    <form action="/submit" method="post">
-      <label for="sale_order_code">Sale Order Code</label>
-      <input type="text" id="sale_order_code" name="sale_order_code" required placeholder="e.g. SO-1029384">
+<div class="wrap">
+  <div class="who">
+    <span>Signed in as <strong>{{ username }}</strong></span>
+    <a href="{{ url_for('logout') }}">Log out</a>
+  </div>
+  <span class="badge">PHASE 0 · NO RULES ENFORCED</span>
+  <h1>Orders — Switch Facility</h1>
+  <p class="sub">Browse orders in Uniware, select the ones you want, and switch them. Every switch is logged.</p>
 
-      <label for="item_codes">Item Codes</label>
-      <input type="text" id="item_codes" name="item_codes" required placeholder="comma-separated, e.g. ITEM123,ITEM124">
-      <div class="hint">Sale order item codes to move, separated by commas.</div>
-
-      <label for="target_facility">Destination Facility</label>
-      <select id="target_facility" name="target_facility" required>
-        <option value="" disabled selected>Select destination</option>
-        {% for f in facilities %}
-        <option value="{{ f.code }}">{{ f.label }}</option>
-        {% endfor %}
-      </select>
-      <div class="hint">To main = commit stock. Back to dummy = release stock.</div>
-
-      <label for="channel">Channel</label>
-      <select id="channel" name="channel" required>
-        <option value="" disabled selected>Select channel</option>
-        {% for c in channels %}
-        <option value="{{ c }}">{{ c }}</option>
-        {% endfor %}
-      </select>
-
-      <button type="submit">Switch Facility</button>
+  <!-- Filters -->
+  <div class="panel">
+    <form method="get" action="/" class="filters">
+      <div>
+        <label>Facility</label>
+        <select name="facility">
+          <option value="">Both</option>
+          {% for f in facilities %}
+          <option value="{{ f.code }}" {% if filters.facility == f.code %}selected{% endif %}>{{ f.code }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Channel</label>
+        <select name="channel">
+          <option value="">All</option>
+          {% for c in channels %}
+          <option value="{{ c }}" {% if filters.channel == c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Status</label>
+        <select name="status">
+          <option value="">All</option>
+          {% for s in ["CREATED","PROCESSING","COMPLETE","CANCELLED"] %}
+          <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>From date</label>
+        <input type="date" name="from_date" value="{{ filters.from_date }}">
+      </div>
+      <div>
+        <label>To date</label>
+        <input type="date" name="to_date" value="{{ filters.to_date }}">
+      </div>
+      <div>
+        <label>Order code</label>
+        <input type="text" name="order_code" value="{{ filters.order_code }}" placeholder="search">
+      </div>
+      <div class="actions">
+        <button type="submit">Search</button>
+        <a class="reset" href="/">Reset</a>
+      </div>
     </form>
   </div>
+
+  {% if search_error %}
+    <div class="err">Search error: {{ search_error }}</div>
+  {% endif %}
+
+  <!-- Results + switch -->
+  <div class="panel">
+    <form method="post" action="{{ url_for('switch_selected') }}">
+      <div class="switchbar">
+        <div>
+          <label>Destination facility</label>
+          <select name="target_facility" required>
+            <option value="" disabled selected>Select destination</option>
+            {% for f in facilities %}
+            <option value="{{ f.code }}">{{ f.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit">Switch selected</button>
+        <span class="count">{{ orders|length }} order(s) shown</span>
+      </div>
+
+      {% if orders %}
+      <table>
+        <thead>
+          <tr>
+            <th><input type="checkbox" onclick="for(const c of document.querySelectorAll('input[name=selected]'))c.checked=this.checked"></th>
+            <th>Order</th>
+            <th>Channel</th>
+            <th>Order date</th>
+            <th>Status</th>
+            <th>Current facility</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in orders %}
+          <tr>
+            <td><input type="checkbox" name="selected" value="{{ o.code }}|{{ o._facility }}"></td>
+            <td>{{ o.displayOrderCode or o.code }}<br><code>{{ o.code }}</code></td>
+            <td>{{ o.channel or "—" }}</td>
+            <td>{{ o.displayOrderDateTime or o.created or "—" }}</td>
+            <td>{{ o.status or "—" }}</td>
+            <td><span class="fac {{ o._facility }}">{{ o._facility }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <div class="empty">No orders found. Adjust the filters and search again.</div>
+      {% endif %}
+    </form>
+  </div>
+</div>
 </body>
 </html>
