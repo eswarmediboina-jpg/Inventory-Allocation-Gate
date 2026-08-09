@@ -131,6 +131,7 @@
       </div>
 
       {% if orders %}
+      <div style="overflow-x:auto;">
       <table>
         <thead>
           <tr>
@@ -143,7 +144,8 @@
             {% if is_queue %}
             <th class="stockcol">Allocatable now (live)</th>
             {% else %}
-            <th class="stockcol">Units · item status</th>
+            <th>Units</th>
+            {% for s in status_cols %}<th>{{ s }}</th>{% endfor %}
             {% endif %}
           </tr>
         </thead>
@@ -156,19 +158,23 @@
             <td>{{ o.displayOrderDateTime or o.created or "—" }}</td>
             <td>{{ o.status or "—" }}</td>
             <td><span class="fac {{ o._facility }}">{{ o._facility }}</span></td>
+            {% if is_queue %}
             <td class="stockcol">
-              {% if is_queue %}
-                {% set alloc = o._allocatable if o._allocatable is not none else 0 %}
-                {% set ordered = o._ordered or 0 %}
-                <span class="alloc {% if ordered > 0 and alloc >= ordered %}ok{% elif alloc > 0 %}part{% else %}none{% endif %}">{{ alloc }} / {{ ordered }} units</span>
-              {% else %}
-                <div class="ssum"><strong>{{ o._ordered or 0 }}</strong> units{% if o._status_summary %} · {% for s, c in o._status_summary.items() %}{{ c }} {{ s }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</div>
-              {% endif %}
+              {% set alloc = o._allocatable if o._allocatable is not none else 0 %}
+              {% set ordered = o._ordered or 0 %}
+              <span class="alloc {% if ordered > 0 and alloc >= ordered %}ok{% elif alloc > 0 %}part{% else %}none{% endif %}">{{ alloc }} / {{ ordered }} units</span>
             </td>
+            {% else %}
+            <td><strong>{{ o._ordered or 0 }}</strong></td>
+            {% for s in status_cols %}
+            <td>{% set c = o._status_summary.get(s, 0) %}{% if c %}{{ c }}{% else %}<span class="muted">·</span>{% endif %}</td>
+            {% endfor %}
+            {% endif %}
           </tr>
           {% endfor %}
         </tbody>
       </table>
+      </div>
       {% else %}
         <div class="empty">No orders found. Adjust the filters and search again.</div>
       {% endif %}

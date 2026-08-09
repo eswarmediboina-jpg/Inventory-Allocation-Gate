@@ -249,6 +249,7 @@ def index():
     # main facility (real stock pool). Item fetches run in parallel; then a
     # single bulk inventory-snapshot call covers all SKUs.
     inv_error = None
+    status_cols = []
     if orders:
         def _load(o):
             try:
@@ -291,13 +292,17 @@ def index():
                     allocatable += min(dem, max(avail, 0))
                 o["_allocatable"] = allocatable
         else:
-            # Main tab: summarise each order's item statuses.
+            # Main tab: pivot item statuses into one column each, counting
+            # units (item codes) per status per order.
+            seen = set()
             for o in orders:
                 counts = {}
                 for it in o["_items"]:
                     s = it.get("status") or "—"
                     counts[s] = counts.get(s, 0) + 1
+                    seen.add(s)
                 o["_status_summary"] = counts
+            status_cols = sorted(seen)
 
     return render_template(
         "index.html",
@@ -310,6 +315,7 @@ def index():
         main_facility=MAIN_FACILITY,
         tab=active_facility,
         is_queue=is_queue,
+        status_cols=status_cols,
         filters=filters,
     )
 
