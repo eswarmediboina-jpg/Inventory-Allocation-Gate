@@ -106,6 +106,7 @@ def search_sale_orders(
     from_date: str = None,
     to_date: str = None,
     display_order_code: str = None,
+    date_type: str = "CREATED",
     display_start: int = 0,
     display_length: int = 50,
 ) -> dict:
@@ -126,6 +127,7 @@ def search_sale_orders(
         "status": status or None,
         "fromDate": from_date or None,
         "toDate": to_date or None,
+        "dateType": date_type if (from_date or to_date) else None,
         "displayOrderCode": display_order_code or None,
         "searchOptions": {
             "displayStart": display_start,
