@@ -26,6 +26,7 @@ usernames/passwords travel in plaintext. See the deployment note at bottom.
 import os
 import time
 import secrets
+from concurrent.futures import ThreadPoolExecutor
 
 # Optional: only used if you point BigQuery at a service-account key via
 # GOOGLE_APPLICATION_CREDENTIALS in a local .env. Uniware uses no env at all.
@@ -41,6 +42,8 @@ from uniware_client import (
     refresh as uniware_refresh,
     switch_facility,
     get_sale_order_items,
+    get_sale_order_line_items,
+    get_inventory_snapshot,
     search_sale_orders,
     UniwareConfigError,
     UniwareAuthError,
@@ -80,6 +83,10 @@ FACILITIES = [
 
 # Refresh the token this many seconds before it actually expires.
 _EXPIRY_SKEW_SECONDS = 120
+
+
+# The facility that holds real stock — used for the live inventory lookup.
+MAIN_FACILITY = next((f["code"] for f in FACILITIES if f["direction"] == "commit"), "zoukst")
 
 
 def available_facilities():
@@ -213,6 +220,42 @@ def index():
     except Exception as e:
         search_error = str(e)
 
+    # Enrich each shown order with its line items + LIVE inventory from the
+    # main facility (real stock pool). Item fetches run in parallel; then a
+    # single bulk inventory-snapshot call covers all SKUs.
+    inv_error = None
+    if orders:
+        def _load(o):
+            try:
+                return get_sale_order_line_items(o["code"], token, facility_code=o.get("_facility"))
+            except Exception:
+                return []
+        try:
+            with ThreadPoolExecutor(max_workers=12) as ex:
+                per_order_items = list(ex.map(_load, orders))
+        except Exception:
+            per_order_items = [[] for _ in orders]
+        for o, items in zip(orders, per_order_items):
+            o["_items"] = items
+
+        skus = sorted({it["sku"] for o in orders for it in o["_items"] if it.get("sku")})
+        inv = {}
+        if skus:
+            try:
+                inv = get_inventory_snapshot(token, skus, MAIN_FACILITY)
+            except Exception as e:
+                inv_error = str(e)
+        for o in orders:
+            for it in o["_items"]:
+                st = inv.get(it.get("sku"), {})
+                it["available"] = st.get("available")
+                it["blocked"] = st.get("blocked")
+                it["short"] = (
+                    it.get("available") is not None
+                    and it.get("qty") is not None
+                    and it["available"] < it["qty"]
+                )
+
     return render_template(
         "index.html",
         username=session.get("username", ""),
@@ -220,6 +263,8 @@ def index():
         facilities=FACILITIES,
         orders=orders,
         search_error=search_error,
+        inv_error=inv_error,
+        main_facility=MAIN_FACILITY,
         filters=filters,
     )
 

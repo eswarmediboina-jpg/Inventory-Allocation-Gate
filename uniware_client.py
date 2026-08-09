@@ -207,6 +207,74 @@ def get_sale_order_items(sale_order_code: str, access_token: str, facility_code:
     return codes
 
 
+def get_sale_order_line_items(sale_order_code: str, access_token: str, facility_code: str = None) -> list:
+    """
+    Return an order's line items as [{"code","sku","qty"}], used to map live
+    inventory beside each order. Pass the facility the order currently lives in.
+    """
+    if not access_token:
+        raise UniwareAuthError("Not logged in. Please log in again.")
+    url = f"{UNIWARE_BASE_URL}/services/rest/v1/oms/saleorder/get"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"bearer {access_token}",
+    }
+    if facility_code:
+        headers["Facility"] = facility_code
+    resp = requests.post(url, headers=headers, json={"code": sale_order_code}, timeout=30)
+    if resp.status_code != 200:
+        raise UniwareConfigError(
+            f"Could not fetch order {sale_order_code} (HTTP {resp.status_code})"
+        )
+    dto = (resp.json() or {}).get("saleOrderDTO") or {}
+    out = []
+    for it in (dto.get("saleOrderItems") or []):
+        out.append({
+            "code": it.get("code"),
+            "sku": it.get("itemSku"),
+            "qty": it.get("quantity") or 1,
+        })
+    return out
+
+
+def get_inventory_snapshot(access_token: str, skus: list, facility_code: str) -> dict:
+    """
+    Live inventory for a batch of SKUs in one facility via Uniware's
+    Inventory Snapshot API. Returns {sku: {"available": int, "blocked": int}}.
+    This is the real-time source of truth (not the 4x/day BigQuery table).
+    """
+    if not access_token:
+        raise UniwareAuthError("Not logged in. Please log in again.")
+    skus = [s for s in (skus or []) if s]
+    if not skus:
+        return {}
+    if not facility_code:
+        raise UniwareConfigError("No facility code for inventory lookup.")
+
+    url = f"{UNIWARE_BASE_URL}/services/rest/v1/inventory/inventorySnapshot/get"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"bearer {access_token}",
+        "Facility": facility_code,
+    }
+    # Snapshot API accepts up to 10k SKUs per call; we're well under that.
+    resp = requests.post(url, headers=headers, json={"itemTypeSKUs": skus}, timeout=60)
+    if resp.status_code != 200:
+        raise UniwareConfigError(
+            f"Inventory snapshot failed (HTTP {resp.status_code}): {(resp.text or '')[:200]}"
+        )
+    data = resp.json()
+    out = {}
+    for snap in (data.get("inventorySnapshots") or []):
+        sku = snap.get("itemTypeSKU")
+        if sku:
+            out[sku] = {
+                "available": snap.get("inventory"),
+                "blocked": snap.get("inventoryBlocked"),
+            }
+    return out
+
+
 def switch_facility(
     sale_order_code: str,
     item_codes: list,

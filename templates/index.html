@@ -33,6 +33,12 @@
   .fac.saleorderswitch { background:#e5e7eb; color:#374151; }
   .empty { text-align:center; color:#9ca3af; padding:28px; font-size:14px; }
   code { font-size:12px; color:#6b7280; }
+  .stk { font-size:12px; padding:1px 0; white-space:nowrap; }
+  .stk .sku { font-weight:600; color:#374151; }
+  .stk .av { color:#065f46; font-weight:700; }
+  .stk.short, .stk.short .av { color:#991b1b; }
+  .muted { color:#9ca3af; }
+  th.stockcol, td.stockcol { min-width:230px; }
 </style>
 </head>
 <body>
@@ -97,6 +103,9 @@
   {% if search_error %}
     <div class="err">Search error: {{ search_error }}</div>
   {% endif %}
+  {% if inv_error %}
+    <div class="err">Live inventory lookup issue: {{ inv_error }}</div>
+  {% endif %}
 
   <!-- Results + switch -->
   <div class="panel">
@@ -125,6 +134,7 @@
             <th>Order date</th>
             <th>Status</th>
             <th>Current facility</th>
+            <th class="stockcol">Live stock — {{ main_facility }} (avail)</th>
           </tr>
         </thead>
         <tbody>
@@ -136,6 +146,16 @@
             <td>{{ o.displayOrderDateTime or o.created or "—" }}</td>
             <td>{{ o.status or "—" }}</td>
             <td><span class="fac {{ o._facility }}">{{ o._facility }}</span></td>
+            <td class="stockcol">
+              {% for it in o._items %}
+                <div class="stk {% if it.short %}short{% endif %}">
+                  <span class="sku">{{ it.sku or '—' }}</span> ×{{ it.qty }} → avail
+                  <span class="av">{{ it.available if it.available is not none else '?' }}</span>{% if it.short %} ⚠ short{% endif %}
+                </div>
+              {% else %}
+                <span class="muted">—</span>
+              {% endfor %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
