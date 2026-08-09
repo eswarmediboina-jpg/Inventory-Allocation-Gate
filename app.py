@@ -96,6 +96,12 @@ _items_lock = threading.Lock()
 _channels_seen = set()
 _channels_lock = threading.Lock()
 
+# Cache the fully-built page per (facility + filters) so flipping between tabs
+# is instant. ?refresh=1 rebuilds live; a switch clears it (see below).
+_PAGE_TTL = 120
+_page_cache = {}
+_page_lock = threading.Lock()
+
 
 def _cached_line_items(order_code, token, facility_code):
     now = time.time()
@@ -202,30 +208,8 @@ def _iso_end(d):
     return f"{d}T23:59:59.000Z" if d else None
 
 
-@app.route("/", methods=["GET"])
-def index():
-    """Browse orders in the configured facilities; pick some to switch."""
-    token = _current_token()
-    if not token:
-        return redirect(url_for("login"))
-
-    filters = {
-        "channel": request.args.get("channel", "").strip(),
-        "status": request.args.get("status", "").strip(),
-        "from_date": request.args.get("from_date", "").strip(),
-        "to_date": request.args.get("to_date", "").strip(),
-        "order_code": request.args.get("order_code", "").strip(),
-        "facility": request.args.get("facility", "").strip(),
-    }
-
-    all_codes = [f["code"] for f in FACILITIES]
-    # Each tab is ONE facility. Default to the awaiting-allocation queue.
-    active_facility = filters["facility"] if filters["facility"] in all_codes else "saleorderswitch"
-    filters["facility"] = active_facility
-    # Queue tab (dummy) = decide + shift, shows live stock. Main tab (zoukst)
-    # = allocated orders, shows per-item status.
-    is_queue = (active_facility != MAIN_FACILITY)
-
+def _build_orders_view(token, active_facility, is_queue, filters):
+    """Search + enrich orders for one tab. Returns a cacheable view dict."""
     orders = []
     search_error = None
     if filters["order_code"]:
@@ -258,9 +242,6 @@ def index():
         except Exception as e:
             search_error = str(e)
 
-    # Enrich each shown order with its line items + LIVE inventory from the
-    # main facility (real stock pool). Item fetches run in parallel; then a
-    # single bulk inventory-snapshot call covers all SKUs.
     inv_error = None
     status_cols = []
     if orders:
@@ -278,12 +259,9 @@ def index():
             per_order_items = [[] for _ in orders]
         for o, items in zip(orders, per_order_items):
             o["_items"] = items
-            # Units ordered = count of sale-order-item codes.
-            o["_ordered"] = len(items)
+            o["_ordered"] = len(items)  # units = count of sale-order-item codes
 
         if is_queue:
-            # Queue tab: how many of each order's units can be allocated from
-            # live main-facility stock right now.
             skus = sorted({it["sku"] for o in orders for it in o["_items"] if it.get("sku")})
             inv = {}
             if skus:
@@ -307,8 +285,6 @@ def index():
                     allocatable += min(dem, max(avail, 0))
                 o["_allocatable"] = allocatable
         else:
-            # Main tab: pivot item statuses into one column each, counting
-            # units (item codes) per status per order.
             seen = set()
             for o in orders:
                 counts = {}
@@ -319,11 +295,66 @@ def index():
                 o["_status_summary"] = counts
             status_cols = sorted(seen)
 
-    # Remember the real channel codes we've seen so the dropdown matches data.
     with _channels_lock:
         for o in orders:
             if o.get("channel"):
                 _channels_seen.add(o["channel"])
+
+    return {
+        "orders": orders,
+        "status_cols": status_cols,
+        "search_error": search_error,
+        "inv_error": inv_error,
+    }
+
+
+@app.route("/", methods=["GET"])
+def index():
+    """Browse orders in the configured facilities; pick some to switch."""
+    token = _current_token()
+    if not token:
+        return redirect(url_for("login"))
+
+    filters = {
+        "channel": request.args.get("channel", "").strip(),
+        "status": request.args.get("status", "").strip(),
+        "from_date": request.args.get("from_date", "").strip(),
+        "to_date": request.args.get("to_date", "").strip(),
+        "order_code": request.args.get("order_code", "").strip(),
+        "facility": request.args.get("facility", "").strip(),
+    }
+
+    all_codes = [f["code"] for f in FACILITIES]
+    # Each tab is ONE facility. Default to the awaiting-allocation queue.
+    active_facility = filters["facility"] if filters["facility"] in all_codes else "saleorderswitch"
+    filters["facility"] = active_facility
+    # Queue tab (dummy) = decide + shift, shows live stock. Main tab (zoukst)
+    # = allocated orders, shows per-item status.
+    is_queue = (active_facility != MAIN_FACILITY)
+
+    # Serve a recently-built page instantly (fast tab switching). ?refresh=1
+    # forces a fresh, live rebuild.
+    cache_key = (active_facility, filters["channel"], filters["status"],
+                 filters["from_date"], filters["to_date"], filters["order_code"])
+    refresh = request.args.get("refresh")
+    now = time.time()
+    view = None
+    if not refresh:
+        with _page_lock:
+            hit = _page_cache.get(cache_key)
+            if hit and now - hit[0] < _PAGE_TTL:
+                view = hit[1]
+    if view is None:
+        view = _build_orders_view(token, active_facility, is_queue, filters)
+        with _page_lock:
+            _page_cache[cache_key] = (now, view)
+
+    orders = view["orders"]
+    status_cols = view["status_cols"]
+    search_error = view["search_error"]
+    inv_error = view["inv_error"]
+
+    with _channels_lock:
         if filters["channel"]:
             _channels_seen.add(filters["channel"])
         channel_options = sorted(_channels_seen)
@@ -414,6 +445,10 @@ def switch_selected():
             uniware_success=ok,
             uniware_message=msg,
         )
+
+    # Orders changed facility — drop cached pages so the lists rebuild fresh.
+    with _page_lock:
+        _page_cache.clear()
 
     return render_template("result.html", results=results, target_facility=target_facility)
 

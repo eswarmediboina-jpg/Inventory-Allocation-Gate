@@ -24,6 +24,8 @@
   .switchbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
   .switchbar select { width:auto; min-width:340px; }
   .count { font-size:12px; color:#6b7280; }
+  .refreshlink { font-size:12px; color:#4f46e5; text-decoration:none; font-weight:600; }
+  .refreshlink:hover { text-decoration:underline; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th, td { text-align:left; padding:9px 10px; border-bottom:1px solid #eef0f3; }
   th { font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:#6b7280; }
@@ -128,6 +130,7 @@
         </div>
         <button type="submit">Switch selected</button>
         <span class="count">{{ orders|length }} order(s) shown</span>
+        <a class="refreshlink" href="?facility={{ tab | urlencode }}&channel={{ filters.channel | urlencode }}&status={{ filters.status | urlencode }}&from_date={{ filters.from_date | urlencode }}&to_date={{ filters.to_date | urlencode }}&order_code={{ filters.order_code | urlencode }}&refresh=1" title="Reload live data now">↻ Refresh (live)</a>
       </div>
 
       {% if orders %}
