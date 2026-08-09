@@ -40,6 +40,11 @@
   .muted { color:#9ca3af; }
   th.stockcol, td.stockcol { min-width:230px; }
   .istat { font-weight:600; color:#374151; }
+  .alloc { font-weight:700; font-size:13px; padding:3px 9px; border-radius:6px; white-space:nowrap; }
+  .alloc.ok { background:#d1fae5; color:#065f46; }
+  .alloc.part { background:#fef3c7; color:#92400e; }
+  .alloc.none { background:#fee2e2; color:#991b1b; }
+  .ssum { font-size:12px; color:#374151; }
   .tabs { display:flex; gap:4px; margin:18px 0 0; border-bottom:2px solid #e5e7eb; }
   .tabs a { padding:11px 18px; font-size:13px; font-weight:600; color:#6b7280; text-decoration:none; border-bottom:2px solid transparent; margin-bottom:-2px; }
   .tabs a.active { color:#111827; border-bottom-color:#111827; }
@@ -136,9 +141,9 @@
             <th>Status</th>
             <th>Current facility</th>
             {% if is_queue %}
-            <th class="stockcol">Live stock — {{ main_facility }} (avail)</th>
+            <th class="stockcol">Allocatable now (live)</th>
             {% else %}
-            <th class="stockcol">Sale-order-item status</th>
+            <th class="stockcol">Units · item status</th>
             {% endif %}
           </tr>
         </thead>
@@ -152,20 +157,13 @@
             <td>{{ o.status or "—" }}</td>
             <td><span class="fac {{ o._facility }}">{{ o._facility }}</span></td>
             <td class="stockcol">
-              {% for it in o._items %}
-                {% if is_queue %}
-                <div class="stk {% if it.short %}short{% endif %}">
-                  <span class="sku">{{ it.sku or '—' }}</span> ×{{ it.qty }} → avail
-                  <span class="av">{{ it.available if it.available is not none else '?' }}</span>{% if it.short %} ⚠ short{% endif %}
-                </div>
-                {% else %}
-                <div class="stk">
-                  <span class="sku">{{ it.sku or '—' }}</span> ×{{ it.qty }} · <span class="istat">{{ it.status or '—' }}</span>
-                </div>
-                {% endif %}
+              {% if is_queue %}
+                {% set alloc = o._allocatable if o._allocatable is not none else 0 %}
+                {% set ordered = o._ordered or 0 %}
+                <span class="alloc {% if ordered > 0 and alloc >= ordered %}ok{% elif alloc > 0 %}part{% else %}none{% endif %}">{{ alloc }} / {{ ordered }} units</span>
               {% else %}
-                <span class="muted">—</span>
-              {% endfor %}
+                <div class="ssum"><strong>{{ o._ordered or 0 }}</strong> units{% if o._status_summary %} · {% for s, c in o._status_summary.items() %}{{ c }} {{ s }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</div>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}

@@ -262,9 +262,12 @@ def index():
             per_order_items = [[] for _ in orders]
         for o, items in zip(orders, per_order_items):
             o["_items"] = items
+            # Units ordered = count of sale-order-item codes.
+            o["_ordered"] = len(items)
 
-        # Live inventory only matters on the queue tab (the allocation decision).
         if is_queue:
+            # Queue tab: how many of each order's units can be allocated from
+            # live main-facility stock right now.
             skus = sorted({it["sku"] for o in orders for it in o["_items"] if it.get("sku")})
             inv = {}
             if skus:
@@ -273,15 +276,28 @@ def index():
                 except Exception as e:
                     inv_error = str(e)
             for o in orders:
+                demand = {}
                 for it in o["_items"]:
-                    st = inv.get(it.get("sku"), {})
-                    it["available"] = st.get("available")
-                    it["blocked"] = st.get("blocked")
-                    it["short"] = (
-                        it.get("available") is not None
-                        and it.get("qty") is not None
-                        and it["available"] < it["qty"]
-                    )
+                    sku = it.get("sku")
+                    if sku:
+                        demand[sku] = demand.get(sku, 0) + 1
+                allocatable = 0
+                for sku, dem in demand.items():
+                    avail = inv.get(sku, {}).get("available") or 0
+                    try:
+                        avail = int(avail)
+                    except (TypeError, ValueError):
+                        avail = 0
+                    allocatable += min(dem, max(avail, 0))
+                o["_allocatable"] = allocatable
+        else:
+            # Main tab: summarise each order's item statuses.
+            for o in orders:
+                counts = {}
+                for it in o["_items"]:
+                    s = it.get("status") or "—"
+                    counts[s] = counts.get(s, 0) + 1
+                o["_status_summary"] = counts
 
     return render_template(
         "index.html",
