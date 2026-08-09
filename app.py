@@ -199,24 +199,28 @@ def index():
     }
 
     all_codes = [f["code"] for f in FACILITIES]
-    which = [filters["facility"]] if filters["facility"] in all_codes else all_codes
+    # Each tab is ONE facility. Default to the awaiting-allocation queue.
+    active_facility = filters["facility"] if filters["facility"] in all_codes else "saleorderswitch"
+    filters["facility"] = active_facility
+    # Queue tab (dummy) = decide + shift, shows live stock. Main tab (zoukst)
+    # = allocated orders, shows per-item status.
+    is_queue = (active_facility != MAIN_FACILITY)
 
     orders = []
     search_error = None
     try:
-        for fac in which:
-            res = search_sale_orders(
-                token,
-                facility_code=fac,
-                channel=filters["channel"] or None,
-                status=filters["status"] or None,
-                from_date=_iso_start(filters["from_date"]),
-                to_date=_iso_end(filters["to_date"]),
-                display_order_code=filters["order_code"] or None,
-            )
-            for el in res["elements"]:
-                el["_facility"] = fac
-                orders.append(el)
+        res = search_sale_orders(
+            token,
+            facility_code=active_facility,
+            channel=filters["channel"] or None,
+            status=filters["status"] or None,
+            from_date=_iso_start(filters["from_date"]),
+            to_date=_iso_end(filters["to_date"]),
+            display_order_code=filters["order_code"] or None,
+        )
+        for el in res["elements"]:
+            el["_facility"] = active_facility
+            orders.append(el)
     except Exception as e:
         search_error = str(e)
 
@@ -238,23 +242,25 @@ def index():
         for o, items in zip(orders, per_order_items):
             o["_items"] = items
 
-        skus = sorted({it["sku"] for o in orders for it in o["_items"] if it.get("sku")})
-        inv = {}
-        if skus:
-            try:
-                inv = get_inventory_snapshot(token, skus, MAIN_FACILITY)
-            except Exception as e:
-                inv_error = str(e)
-        for o in orders:
-            for it in o["_items"]:
-                st = inv.get(it.get("sku"), {})
-                it["available"] = st.get("available")
-                it["blocked"] = st.get("blocked")
-                it["short"] = (
-                    it.get("available") is not None
-                    and it.get("qty") is not None
-                    and it["available"] < it["qty"]
-                )
+        # Live inventory only matters on the queue tab (the allocation decision).
+        if is_queue:
+            skus = sorted({it["sku"] for o in orders for it in o["_items"] if it.get("sku")})
+            inv = {}
+            if skus:
+                try:
+                    inv = get_inventory_snapshot(token, skus, MAIN_FACILITY)
+                except Exception as e:
+                    inv_error = str(e)
+            for o in orders:
+                for it in o["_items"]:
+                    st = inv.get(it.get("sku"), {})
+                    it["available"] = st.get("available")
+                    it["blocked"] = st.get("blocked")
+                    it["short"] = (
+                        it.get("available") is not None
+                        and it.get("qty") is not None
+                        and it["available"] < it["qty"]
+                    )
 
     return render_template(
         "index.html",
@@ -265,6 +271,8 @@ def index():
         search_error=search_error,
         inv_error=inv_error,
         main_facility=MAIN_FACILITY,
+        tab=active_facility,
+        is_queue=is_queue,
         filters=filters,
     )
 

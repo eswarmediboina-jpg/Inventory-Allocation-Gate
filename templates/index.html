@@ -39,6 +39,11 @@
   .stk.short, .stk.short .av { color:#991b1b; }
   .muted { color:#9ca3af; }
   th.stockcol, td.stockcol { min-width:230px; }
+  .istat { font-weight:600; color:#374151; }
+  .tabs { display:flex; gap:4px; margin:18px 0 0; border-bottom:2px solid #e5e7eb; }
+  .tabs a { padding:11px 18px; font-size:13px; font-weight:600; color:#6b7280; text-decoration:none; border-bottom:2px solid transparent; margin-bottom:-2px; }
+  .tabs a.active { color:#111827; border-bottom-color:#111827; }
+  .tabs a:hover { color:#111827; }
 </style>
 </head>
 <body>
@@ -51,18 +56,15 @@
   <h1>Orders — Switch Facility</h1>
   <p class="sub">Browse orders in Uniware, select the ones you want, and switch them. Every switch is logged.</p>
 
+  <div class="tabs">
+    <a href="/?facility=saleorderswitch" class="{% if is_queue %}active{% endif %}">📥 Awaiting allocation (saleorderswitch)</a>
+    <a href="/?facility={{ main_facility }}" class="{% if not is_queue %}active{% endif %}">📦 Main — allocated ({{ main_facility }})</a>
+  </div>
+
   <!-- Filters -->
   <div class="panel">
     <form method="get" action="/" class="filters">
-      <div>
-        <label>Facility</label>
-        <select name="facility">
-          <option value="">Both</option>
-          {% for f in facilities %}
-          <option value="{{ f.code }}" {% if filters.facility == f.code %}selected{% endif %}>{{ f.code }}</option>
-          {% endfor %}
-        </select>
-      </div>
+      <input type="hidden" name="facility" value="{{ filters.facility }}">
       <div>
         <label>Channel</label>
         <select name="channel">
@@ -114,9 +116,8 @@
         <div>
           <label>Destination facility</label>
           <select name="target_facility" required>
-            <option value="" disabled selected>Select destination</option>
             {% for f in facilities %}
-            <option value="{{ f.code }}">{{ f.label }}</option>
+            <option value="{{ f.code }}" {% if f.code != tab %}selected{% endif %}>{{ f.label }}</option>
             {% endfor %}
           </select>
         </div>
@@ -134,7 +135,11 @@
             <th>Order date</th>
             <th>Status</th>
             <th>Current facility</th>
+            {% if is_queue %}
             <th class="stockcol">Live stock — {{ main_facility }} (avail)</th>
+            {% else %}
+            <th class="stockcol">Sale-order-item status</th>
+            {% endif %}
           </tr>
         </thead>
         <tbody>
@@ -148,10 +153,16 @@
             <td><span class="fac {{ o._facility }}">{{ o._facility }}</span></td>
             <td class="stockcol">
               {% for it in o._items %}
+                {% if is_queue %}
                 <div class="stk {% if it.short %}short{% endif %}">
                   <span class="sku">{{ it.sku or '—' }}</span> ×{{ it.qty }} → avail
                   <span class="av">{{ it.available if it.available is not none else '?' }}</span>{% if it.short %} ⚠ short{% endif %}
                 </div>
+                {% else %}
+                <div class="stk">
+                  <span class="sku">{{ it.sku or '—' }}</span> ×{{ it.qty }} · <span class="istat">{{ it.status or '—' }}</span>
+                </div>
+                {% endif %}
               {% else %}
                 <span class="muted">—</span>
               {% endfor %}

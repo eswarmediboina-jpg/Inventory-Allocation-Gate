@@ -233,6 +233,7 @@ def get_sale_order_line_items(sale_order_code: str, access_token: str, facility_
             "code": it.get("code"),
             "sku": it.get("itemSku"),
             "qty": it.get("quantity") or 1,
+            "status": it.get("statusCode") or it.get("status") or "",
         })
     return out
 
