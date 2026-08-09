@@ -130,7 +130,10 @@ def search_sale_orders(
         "searchOptions": {
             "displayStart": display_start,
             "displayLength": display_length,
-            "getCount": True,
+            # getCount over an unfiltered facility makes Uniware scan every
+            # order and is the main cause of search timeouts. We don't need
+            # the grand total, so skip it — big speedup.
+            "getCount": False,
         },
     }
     # Drop keys that are None so we don't over-filter.
@@ -145,7 +148,7 @@ def search_sale_orders(
     # even where the docs mark it optional. Send the facility being searched.
     if facility_code:
         headers["Facility"] = facility_code
-    resp = requests.post(url, headers=headers, json=body, timeout=30)
+    resp = requests.post(url, headers=headers, json=body, timeout=60)
     if resp.status_code != 200:
         raise UniwareConfigError(
             f"Order search failed (HTTP {resp.status_code}): {(resp.text or '')[:300]}"
