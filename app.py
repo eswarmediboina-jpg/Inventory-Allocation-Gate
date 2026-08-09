@@ -453,6 +453,134 @@ def switch_selected():
     return render_template("result.html", results=results, target_facility=target_facility)
 
 
+def _order_sku_rows(order, token):
+    """Group an order's line items by SKU with live available stock."""
+    by_sku = {}
+    for it in order.get("_items", []):
+        if it.get("sku"):
+            by_sku.setdefault(it["sku"], []).append(it["code"])
+    inv = {}
+    if by_sku:
+        try:
+            inv = get_inventory_snapshot(token, list(by_sku.keys()), MAIN_FACILITY)
+        except Exception:
+            inv = {}
+    rows = []
+    for sku, codes in sorted(by_sku.items()):
+        avail = inv.get(sku, {}).get("available") or 0
+        try:
+            avail = max(int(avail), 0)
+        except (TypeError, ValueError):
+            avail = 0
+        ordered = len(codes)
+        rows.append({
+            "sku": sku,
+            "codes": codes,
+            "ordered": ordered,
+            "available": avail,
+            "allocatable": min(ordered, avail),
+        })
+    return rows
+
+
+@app.route("/order/<path:order_code>", methods=["GET"])
+def order_detail(order_code):
+    """Per-order screen for partial shifting (Route 1: quantity / per-SKU)."""
+    token = _current_token()
+    if not token:
+        return redirect(url_for("login"))
+
+    error = None
+    order = None
+    rows = []
+    try:
+        order = get_sale_order_full(order_code, token)
+        if not order:
+            error = f"Order {order_code} not found."
+    except Exception as e:
+        error = str(e)
+    if order:
+        rows = _order_sku_rows(order, token)
+
+    return render_template(
+        "order_detail.html",
+        username=session.get("username", ""),
+        order=order,
+        order_code=order_code,
+        rows=rows,
+        total_ordered=sum(r["ordered"] for r in rows),
+        total_allocatable=sum(r["allocatable"] for r in rows),
+        main_facility=MAIN_FACILITY,
+        error=error,
+    )
+
+
+@app.route("/order/<path:order_code>/shift", methods=["POST"])
+def order_shift(order_code):
+    """Shift a chosen subset of an order's item codes to the main facility."""
+    token = _current_token()
+    if not token:
+        return redirect(url_for("login"))
+
+    try:
+        order = get_sale_order_full(order_code, token)
+    except Exception:
+        order = None
+    if not order:
+        return render_template("result.html", target_facility=MAIN_FACILITY,
+                               results=[{"order": order_code, "ok": False, "count": 0,
+                                         "message": "Could not load the order to shift."}])
+
+    rows = _order_sku_rows(order, token)  # live caps, recomputed server-side
+
+    selected = []
+    auto_total = request.form.get("auto_total", "").strip()
+    if auto_total.isdigit() and int(auto_total) > 0:
+        # Total auto-pick: greedily take allocatable units across SKUs.
+        remaining = int(auto_total)
+        for r in rows:
+            take = min(remaining, r["allocatable"])
+            selected += r["codes"][:take]
+            remaining -= take
+            if remaining <= 0:
+                break
+    else:
+        # Per-SKU quantities.
+        for r in rows:
+            raw = request.form.get(f"qty_{r['sku']}", "0").strip()
+            q = int(raw) if raw.isdigit() else 0
+            take = min(q, r["allocatable"])
+            selected += r["codes"][:take]
+
+    if not selected:
+        return render_template("result.html", target_facility=MAIN_FACILITY,
+                               results=[{"order": order_code, "ok": False, "count": 0,
+                                         "message": "Nothing to shift (0 units, or no allocatable stock)."}])
+
+    ok = False
+    msg = ""
+    try:
+        res = switch_facility(order_code, selected, MAIN_FACILITY, token)
+        ok = bool(res.get("successful", False))
+        msg = res.get("message", "") or ("OK" if ok else "Failed")
+        if not ok and res.get("errors"):
+            msg = f"{msg}: {res.get('errors')}"
+    except Exception as e:
+        msg = str(e)
+
+    log_switch_event(
+        sale_order_code=order_code, item_codes=selected, source_channel="",
+        target_facility=MAIN_FACILITY, requested_by=session.get("username", ""),
+        rule_check_result="ALLOWED_NO_RULES", rule_check_reason=None,
+        uniware_success=ok, uniware_message=msg,
+    )
+    with _page_lock:
+        _page_cache.clear()
+
+    return render_template("result.html", target_facility=MAIN_FACILITY,
+                           results=[{"order": order_code, "ok": ok, "count": len(selected), "message": msg}])
+
+
 if __name__ == "__main__":
     # debug=False: never expose the interactive debugger on an app that
     # handles real credentials and triggers real inventory movement.

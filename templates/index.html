@@ -156,7 +156,7 @@
           {% for o in orders %}
           <tr>
             <td><input type="checkbox" name="selected" value="{{ o.code }}|{{ o._facility }}"></td>
-            <td>{{ o.displayOrderCode or o.code }}<br><code>{{ o.code }}</code></td>
+            <td><a href="{{ url_for('order_detail', order_code=o.code, facility=o._facility) }}">{{ o.displayOrderCode or o.code }}</a><br><code>{{ o.code }}</code></td>
             <td>{{ o.channel or "—" }}</td>
             <td>{{ o.displayOrderDateTime or o.created or "—" }}</td>
             <td>{{ o.status or "—" }}</td>
