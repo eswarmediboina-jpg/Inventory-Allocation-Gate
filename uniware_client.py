@@ -240,6 +240,46 @@ def get_sale_order_line_items(sale_order_code: str, access_token: str, facility_
     return out
 
 
+def get_sale_order_full(sale_order_code: str, access_token: str) -> dict:
+    """
+    Look up ONE order directly by its Uniware sale-order code (the internal
+    `code`, e.g. '49989910027990_New'), regardless of facility. Returns an
+    order dict shaped like a search result (+ its items), or None if not found.
+    """
+    if not access_token:
+        raise UniwareAuthError("Not logged in. Please log in again.")
+    if not sale_order_code:
+        return None
+    url = f"{UNIWARE_BASE_URL}/services/rest/v1/oms/saleorder/get"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"bearer {access_token}",
+    }
+    resp = requests.post(url, headers=headers, json={"code": sale_order_code}, timeout=30)
+    if resp.status_code != 200:
+        return None
+    dto = (resp.json() or {}).get("saleOrderDTO")
+    if not dto:
+        return None
+    items = []
+    for it in (dto.get("saleOrderItems") or []):
+        items.append({
+            "code": it.get("code"),
+            "sku": it.get("itemSku"),
+            "qty": it.get("quantity") or 1,
+            "status": it.get("statusCode") or it.get("status") or "",
+        })
+    return {
+        "code": dto.get("code"),
+        "displayOrderCode": dto.get("displayOrderCode"),
+        "channel": dto.get("channel"),
+        "status": dto.get("status"),
+        "displayOrderDateTime": dto.get("displayOrderDateTime") or dto.get("created"),
+        "_facility": dto.get("facilityCode") or "",
+        "_items": items,
+    }
+
+
 def get_inventory_snapshot(access_token: str, skus: list, facility_code: str) -> dict:
     """
     Live inventory for a batch of SKUs in one facility via Uniware's

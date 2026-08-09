@@ -44,6 +44,7 @@ from uniware_client import (
     switch_facility,
     get_sale_order_items,
     get_sale_order_line_items,
+    get_sale_order_full,
     get_inventory_snapshot,
     search_sale_orders,
     UniwareConfigError,
@@ -227,22 +228,35 @@ def index():
 
     orders = []
     search_error = None
-    try:
-        res = search_sale_orders(
-            token,
-            facility_code=active_facility,
-            channel=filters["channel"] or None,
-            status=filters["status"] or None,
-            from_date=_iso_start(filters["from_date"]),
-            to_date=_iso_end(filters["to_date"]),
-            display_order_code=filters["order_code"] or None,
-            display_length=30,
-        )
-        for el in res["elements"]:
-            el["_facility"] = active_facility
-            orders.append(el)
-    except Exception as e:
-        search_error = str(e)
+    if filters["order_code"]:
+        # Direct lookup by Uniware sale-order code — finds the exact order in
+        # whatever facility it's in (bypasses the 30-cap and display-code match).
+        try:
+            o = get_sale_order_full(filters["order_code"], token)
+            if o:
+                if not o.get("_facility"):
+                    o["_facility"] = active_facility
+                orders = [o]
+            else:
+                search_error = f"No order found with sale-order code '{filters['order_code']}'."
+        except Exception as e:
+            search_error = str(e)
+    else:
+        try:
+            res = search_sale_orders(
+                token,
+                facility_code=active_facility,
+                channel=filters["channel"] or None,
+                status=filters["status"] or None,
+                from_date=_iso_start(filters["from_date"]),
+                to_date=_iso_end(filters["to_date"]),
+                display_length=30,
+            )
+            for el in res["elements"]:
+                el["_facility"] = active_facility
+                orders.append(el)
+        except Exception as e:
+            search_error = str(e)
 
     # Enrich each shown order with its line items + LIVE inventory from the
     # main facility (real stock pool). Item fetches run in parallel; then a
@@ -251,6 +265,8 @@ def index():
     status_cols = []
     if orders:
         def _load(o):
+            if o.get("_items") is not None:
+                return o["_items"]  # already fetched (direct code lookup)
             try:
                 return _cached_line_items(o["code"], token, o.get("_facility"))
             except Exception:
