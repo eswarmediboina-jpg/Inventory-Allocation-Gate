@@ -30,7 +30,7 @@
 </head>
 <body>
 <div class="wrap">
-  <a class="back" href="/?facility=saleorderswitch">← Back to orders</a>
+  <a class="back" href="/?facility={{ source_facility }}">← Back to orders</a>
   <h1>Shift order {{ order.displayOrderCode or order_code if order else order_code }}</h1>
 
   {% if order %}
@@ -44,11 +44,12 @@
 
   {% if order %}
   <div class="totals">
-    Total units ordered: <strong>{{ total_ordered }}</strong> ·
-    Allocatable from {{ main_facility }} now: <strong>{{ total_allocatable }}</strong>
+    Units in {{ source_facility }}: <strong>{{ total_ordered }}</strong> ·
+    {% if committing %}Allocatable to {{ dest_facility }} now: <strong>{{ total_allocatable }}</strong>{% else %}Releasable to {{ dest_facility }}: <strong>{{ total_allocatable }}</strong>{% endif %}
   </div>
 
   <form method="post" action="{{ url_for('order_shift', order_code=order_code) }}">
+    <input type="hidden" name="source_facility" value="{{ source_facility }}">
     <!-- Route 1a: total auto-pick -->
     <div class="panel">
       <h2>Option A — Shift a total quantity (auto-pick)</h2>
@@ -64,14 +65,14 @@
       <p class="hint">Leave the box above blank and set per-SKU amounts here. Each is capped at what's allocatable.</p>
       <table>
         <thead>
-          <tr><th>SKU</th><th class="num">Ordered</th><th class="num">Available ({{ main_facility }})</th><th class="num">Allocatable</th><th class="num">Shift qty</th></tr>
+          <tr><th>SKU</th><th class="num">Ordered</th>{% if committing %}<th class="num">Available ({{ main_facility }})</th>{% endif %}<th class="num">{% if committing %}Allocatable{% else %}Releasable{% endif %}</th><th class="num">Shift qty</th></tr>
         </thead>
         <tbody>
           {% for r in rows %}
           <tr>
             <td>{{ r.sku }}</td>
             <td class="num">{{ r.ordered }}</td>
-            <td class="num {% if r.available < r.ordered %}short{% endif %}">{{ r.available }}</td>
+            {% if committing %}<td class="num {% if r.available is not none and r.available < r.ordered %}short{% endif %}">{{ r.available if r.available is not none else '—' }}</td>{% endif %}
             <td class="num">{{ r.allocatable }}</td>
             <td class="num"><input type="number" name="qty_{{ r.sku }}" min="0" max="{{ r.allocatable }}" placeholder="0"></td>
           </tr>
@@ -80,7 +81,7 @@
       </table>
     </div>
 
-    <button type="submit">Shift selected units to {{ main_facility }}</button>
+    <button type="submit">Shift selected units to {{ dest_facility }}</button>
   </form>
   {% endif %}
 </div>

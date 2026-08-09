@@ -236,6 +236,7 @@ def get_sale_order_line_items(sale_order_code: str, access_token: str, facility_
             "sku": it.get("itemSku"),
             "qty": it.get("quantity") or 1,
             "status": it.get("statusCode") or it.get("status") or "",
+            "facility": it.get("facilityCode") or "",
         })
     return out
 
@@ -268,6 +269,7 @@ def get_sale_order_full(sale_order_code: str, access_token: str) -> dict:
             "sku": it.get("itemSku"),
             "qty": it.get("quantity") or 1,
             "status": it.get("statusCode") or it.get("status") or "",
+            "facility": it.get("facilityCode") or "",
         })
     return {
         "code": dto.get("code"),

@@ -218,8 +218,7 @@ def _build_orders_view(token, active_facility, is_queue, filters):
         try:
             o = get_sale_order_full(filters["order_code"], token)
             if o:
-                if not o.get("_facility"):
-                    o["_facility"] = active_facility
+                o["_facility"] = active_facility  # show it in the current tab's context
                 orders = [o]
             else:
                 search_error = f"No order found with sale-order code '{filters['order_code']}'."
@@ -258,8 +257,10 @@ def _build_orders_view(token, active_facility, is_queue, filters):
         except Exception:
             per_order_items = [[] for _ in orders]
         for o, items in zip(orders, per_order_items):
-            o["_items"] = items
-            o["_ordered"] = len(items)  # units = count of sale-order-item codes
+            # An order can be split across facilities after a partial shift;
+            # keep only the items currently in THIS tab's facility.
+            o["_items"] = [it for it in items if (it.get("facility") or active_facility) == active_facility]
+            o["_ordered"] = len(o["_items"])  # units = item codes in this facility
 
         if is_queue:
             skus = sorted({it["sku"] for o in orders for it in o["_items"] if it.get("sku")})
@@ -453,34 +454,49 @@ def switch_selected():
     return render_template("result.html", results=results, target_facility=target_facility)
 
 
-def _order_sku_rows(order, token):
-    """Group an order's line items by SKU with live available stock."""
+def _order_sku_rows(order, token, source_facility, committing):
+    """
+    Group an order's line items (only those currently in `source_facility`)
+    by SKU. If committing (moving INTO main), cap by live main-facility stock;
+    if releasing (moving OUT of main), everything is shiftable.
+    """
     by_sku = {}
     for it in order.get("_items", []):
-        if it.get("sku"):
+        if it.get("sku") and (it.get("facility") or source_facility) == source_facility:
             by_sku.setdefault(it["sku"], []).append(it["code"])
     inv = {}
-    if by_sku:
+    if committing and by_sku:
         try:
             inv = get_inventory_snapshot(token, list(by_sku.keys()), MAIN_FACILITY)
         except Exception:
             inv = {}
     rows = []
     for sku, codes in sorted(by_sku.items()):
-        avail = inv.get(sku, {}).get("available") or 0
-        try:
-            avail = max(int(avail), 0)
-        except (TypeError, ValueError):
-            avail = 0
         ordered = len(codes)
+        if committing:
+            avail = inv.get(sku, {}).get("available") or 0
+            try:
+                avail = max(int(avail), 0)
+            except (TypeError, ValueError):
+                avail = 0
+            allocatable = min(ordered, avail)
+        else:
+            avail = None            # releasing has no stock gate
+            allocatable = ordered
         rows.append({
             "sku": sku,
             "codes": codes,
             "ordered": ordered,
             "available": avail,
-            "allocatable": min(ordered, avail),
+            "allocatable": allocatable,
         })
     return rows
+
+
+def _shift_dirn(source_facility):
+    """Given the source facility, return (dest_facility, committing?)."""
+    dest = MAIN_FACILITY if source_facility != MAIN_FACILITY else "saleorderswitch"
+    return dest, (dest == MAIN_FACILITY)
 
 
 @app.route("/order/<path:order_code>", methods=["GET"])
@@ -489,6 +505,9 @@ def order_detail(order_code):
     token = _current_token()
     if not token:
         return redirect(url_for("login"))
+
+    source_facility = request.args.get("facility", "").strip() or "saleorderswitch"
+    dest_facility, committing = _shift_dirn(source_facility)
 
     error = None
     order = None
@@ -500,7 +519,7 @@ def order_detail(order_code):
     except Exception as e:
         error = str(e)
     if order:
-        rows = _order_sku_rows(order, token)
+        rows = _order_sku_rows(order, token, source_facility, committing)
 
     return render_template(
         "order_detail.html",
@@ -510,6 +529,9 @@ def order_detail(order_code):
         rows=rows,
         total_ordered=sum(r["ordered"] for r in rows),
         total_allocatable=sum(r["allocatable"] for r in rows),
+        source_facility=source_facility,
+        dest_facility=dest_facility,
+        committing=committing,
         main_facility=MAIN_FACILITY,
         error=error,
     )
@@ -522,16 +544,19 @@ def order_shift(order_code):
     if not token:
         return redirect(url_for("login"))
 
+    source_facility = request.form.get("source_facility", "").strip() or "saleorderswitch"
+    dest_facility, committing = _shift_dirn(source_facility)
+
     try:
         order = get_sale_order_full(order_code, token)
     except Exception:
         order = None
     if not order:
-        return render_template("result.html", target_facility=MAIN_FACILITY,
+        return render_template("result.html", target_facility=dest_facility,
                                results=[{"order": order_code, "ok": False, "count": 0,
                                          "message": "Could not load the order to shift."}])
 
-    rows = _order_sku_rows(order, token)  # live caps, recomputed server-side
+    rows = _order_sku_rows(order, token, source_facility, committing)  # live caps
 
     selected = []
     auto_total = request.form.get("auto_total", "").strip()
@@ -553,14 +578,14 @@ def order_shift(order_code):
             selected += r["codes"][:take]
 
     if not selected:
-        return render_template("result.html", target_facility=MAIN_FACILITY,
+        return render_template("result.html", target_facility=dest_facility,
                                results=[{"order": order_code, "ok": False, "count": 0,
                                          "message": "Nothing to shift (0 units, or no allocatable stock)."}])
 
     ok = False
     msg = ""
     try:
-        res = switch_facility(order_code, selected, MAIN_FACILITY, token)
+        res = switch_facility(order_code, selected, dest_facility, token)
         ok = bool(res.get("successful", False))
         msg = res.get("message", "") or ("OK" if ok else "Failed")
         if not ok and res.get("errors"):
@@ -570,14 +595,14 @@ def order_shift(order_code):
 
     log_switch_event(
         sale_order_code=order_code, item_codes=selected, source_channel="",
-        target_facility=MAIN_FACILITY, requested_by=session.get("username", ""),
+        target_facility=dest_facility, requested_by=session.get("username", ""),
         rule_check_result="ALLOWED_NO_RULES", rule_check_reason=None,
         uniware_success=ok, uniware_message=msg,
     )
     with _page_lock:
         _page_cache.clear()
 
-    return render_template("result.html", target_facility=MAIN_FACILITY,
+    return render_template("result.html", target_facility=dest_facility,
                            results=[{"order": order_code, "ok": ok, "count": len(selected), "message": msg}])
 
 
