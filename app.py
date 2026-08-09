@@ -26,6 +26,7 @@ usernames/passwords travel in plaintext. See the deployment note at bottom.
 import os
 import time
 import secrets
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 # Optional: only used if you point BigQuery at a service-account key via
@@ -87,6 +88,25 @@ _EXPIRY_SKEW_SECONDS = 120
 
 # The facility that holds real stock — used for the live inventory lookup.
 MAIN_FACILITY = next((f["code"] for f in FACILITIES if f["direction"] == "commit"), "zoukst")
+
+# Short-lived cache of order line items, so reloads don't re-fetch every order
+# every time. Items/statuses barely change minute-to-minute. Live INVENTORY is
+# never cached (fetched fresh each load).
+_ITEMS_TTL = 180
+_items_cache = {}
+_items_lock = threading.Lock()
+
+
+def _cached_line_items(order_code, token, facility_code):
+    now = time.time()
+    with _items_lock:
+        hit = _items_cache.get(order_code)
+        if hit and now - hit[0] < _ITEMS_TTL:
+            return hit[1]
+    items = get_sale_order_line_items(order_code, token, facility_code=facility_code)
+    with _items_lock:
+        _items_cache[order_code] = (now, items)
+    return items
 
 
 def available_facilities():
@@ -217,6 +237,7 @@ def index():
             from_date=_iso_start(filters["from_date"]),
             to_date=_iso_end(filters["to_date"]),
             display_order_code=filters["order_code"] or None,
+            display_length=30,
         )
         for el in res["elements"]:
             el["_facility"] = active_facility
@@ -231,11 +252,11 @@ def index():
     if orders:
         def _load(o):
             try:
-                return get_sale_order_line_items(o["code"], token, facility_code=o.get("_facility"))
+                return _cached_line_items(o["code"], token, o.get("_facility"))
             except Exception:
                 return []
         try:
-            with ThreadPoolExecutor(max_workers=12) as ex:
+            with ThreadPoolExecutor(max_workers=24) as ex:
                 per_order_items = list(ex.map(_load, orders))
         except Exception:
             per_order_items = [[] for _ in orders]
