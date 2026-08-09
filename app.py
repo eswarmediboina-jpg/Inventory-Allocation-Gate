@@ -65,12 +65,6 @@ app.config.update(
     SESSION_COOKIE_SECURE=os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true",
 )
 
-# Channels — hardcoded (used only to label each log entry with the channel).
-CHANNELS = [
-    "Amazon", "Flipkart", "Myntra", "Distributor_B2B",
-    "Blinkit", "Zepto", "Swiggy_Instamart", "D2C_Shopify",
-]
-
 # The destination facilities offered in the form. Single source of truth —
 # hardcoded on purpose. To add a facility later, add a row here. Only codes
 # listed here are accepted from the form, so the gate can never be pointed at
@@ -95,6 +89,11 @@ MAIN_FACILITY = next((f["code"] for f in FACILITIES if f["direction"] == "commit
 _ITEMS_TTL = 180
 _items_cache = {}
 _items_lock = threading.Lock()
+
+# Real channel codes accumulate here from actual order data (there's no
+# "list channels" API), so the filter dropdown always matches Uniware's codes.
+_channels_seen = set()
+_channels_lock = threading.Lock()
 
 
 def _cached_line_items(order_code, token, facility_code):
@@ -304,10 +303,19 @@ def index():
                 o["_status_summary"] = counts
             status_cols = sorted(seen)
 
+    # Remember the real channel codes we've seen so the dropdown matches data.
+    with _channels_lock:
+        for o in orders:
+            if o.get("channel"):
+                _channels_seen.add(o["channel"])
+        if filters["channel"]:
+            _channels_seen.add(filters["channel"])
+        channel_options = sorted(_channels_seen)
+
     return render_template(
         "index.html",
         username=session.get("username", ""),
-        channels=CHANNELS,
+        channels=channel_options,
         facilities=FACILITIES,
         orders=orders,
         search_error=search_error,
