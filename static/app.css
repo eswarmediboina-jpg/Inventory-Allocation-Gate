@@ -2,31 +2,37 @@
    Facility Switch Gate — shared design system
    Clean, modern ops tool. Slate neutrals + indigo primary.
    ========================================================================== */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/* Zouk brand system — deep teal + terracotta on warm cream, Inter, squared. */
 :root {
-  --bg:        #eef1f6;
-  --bg-grad-1: #eef2ff;
-  --bg-grad-2: #f5f7fb;
+  --bg:        #fcf7f3;   /* Zouk cream */
+  --bg-grad-1: #fcf7f3;
+  --bg-grad-2: #ffffff;
   --surface:   #ffffff;
-  --border:    #e4e8f0;
-  --border-strong: #d4dae5;
-  --text:      #0f172a;
-  --text-mut:  #64748b;
-  --text-faint:#94a3b8;
+  --border:    #d8dddc;
+  --border-strong: #c7cfce;
+  --text:      #0b485d;   /* Zouk deep teal */
+  --text-mut:  #5f7a84;
+  --text-faint:#9bb0b7;
 
-  --primary:   #4f46e5;
-  --primary-h: #4338ca;
-  --primary-weak: #eef2ff;
+  --primary:   #0d485d;   /* Zouk teal (buttons/links) */
+  --primary-h: #093749;
+  --primary-weak: #e6edf1;
 
-  --ok-bg: #dcfce7; --ok-tx: #15803d;
-  --warn-bg: #fef3c7; --warn-tx: #b45309;
-  --dang-bg: #fee2e2; --dang-tx: #b91c1c;
-  --blue-bg: #dbeafe; --blue-tx: #1d4ed8;
+  --accent:    #cc664e;   /* Zouk terracotta (headings) */
+  --accent-h:  #b4553f;
 
-  --radius: 14px;
-  --radius-sm: 9px;
-  --shadow: 0 1px 2px rgba(15,23,42,.04), 0 4px 16px rgba(15,23,42,.06);
-  --shadow-sm: 0 1px 2px rgba(15,23,42,.06);
-  --ring: 0 0 0 3px rgba(79,70,229,.18);
+  --ok-bg: #dce9d2; --ok-tx: #307a07;
+  --warn-bg: #fdecd8; --warn-tx: #b45309;
+  --dang-bg: #f7d7d7; --dang-tx: #cb2b2b;
+  --blue-bg: #e4edf0; --blue-tx: #0d485d;   /* facility pill = teal tint */
+
+  --radius: 8px;
+  --radius-sm: 4px;
+  --shadow: 0 1px 2px rgba(11,72,93,.05), 0 6px 20px rgba(11,72,93,.06);
+  --shadow-sm: 0 1px 2px rgba(11,72,93,.07);
+  --ring: 0 0 0 3px rgba(13,72,93,.16);
   --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
@@ -36,8 +42,7 @@ html, body { margin: 0; }
 body {
   font-family: var(--font);
   color: var(--text);
-  background: linear-gradient(180deg, var(--bg-grad-1) 0%, var(--bg-grad-2) 220px, var(--bg) 100%);
-  background-attachment: fixed;
+  background: var(--bg);
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -57,24 +62,24 @@ body {
   font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -.01em;
 }
 .who .brand .logo {
-  width: 26px; height: 26px; border-radius: 8px;
-  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  width: 28px; height: 28px; border-radius: 3px;
+  background: var(--primary);
   display: inline-flex; align-items: center; justify-content: center;
-  color: #fff; font-size: 15px; box-shadow: 0 2px 6px rgba(79,70,229,.35);
+  color: #fff; font-size: 14px; font-weight: 700; box-shadow: 0 2px 6px rgba(11,72,93,.3);
 }
 .who .right { display: flex; align-items: center; gap: 14px; }
 .who a { color: var(--primary); text-decoration: none; font-weight: 600; }
 .who a:hover { text-decoration: underline; }
 
 /* ---- Headings ---- */
-h1 { font-size: 22px; font-weight: 700; letter-spacing: -.02em; margin: 14px 0 4px; }
+h1 { font-size: 23px; font-weight: 700; letter-spacing: -.01em; margin: 14px 0 4px; color: var(--accent); }
 h2 { font-size: 15px; font-weight: 700; margin: 0 0 4px; }
 p.sub { color: var(--text-mut); font-size: 13.5px; margin: 0 0 18px; max-width: 70ch; }
 
 .badge {
-  display: inline-block; background: var(--warn-bg); color: var(--warn-tx);
-  font-size: 11px; font-weight: 700; letter-spacing: .04em;
-  padding: 4px 10px; border-radius: 999px;
+  display: inline-block; background: #f6e3dd; color: var(--accent-h);
+  font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  padding: 4px 10px; border-radius: 2px;
 }
 
 /* ---- Cards / panels ---- */
@@ -108,10 +113,11 @@ select { appearance: none; background-image:
 /* ---- Buttons ---- */
 button, .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 10px 18px; font-size: 13.5px; font-weight: 600; font-family: inherit;
+  padding: 11px 24px; font-size: 12.5px; font-weight: 600; font-family: inherit;
+  text-transform: uppercase; letter-spacing: .1em;
   color: #fff; background: var(--primary); border: 1px solid var(--primary);
-  border-radius: var(--radius-sm); cursor: pointer;
-  box-shadow: 0 1px 2px rgba(79,70,229,.25); transition: background .12s, box-shadow .12s, transform .02s;
+  border-radius: 2px; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(11,72,93,.2); transition: background .12s, box-shadow .12s, transform .02s;
 }
 button:hover, .btn:hover { background: var(--primary-h); border-color: var(--primary-h); }
 button:active, .btn:active { transform: translateY(1px); }
