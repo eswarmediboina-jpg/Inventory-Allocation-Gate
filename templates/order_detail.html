@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Order {{ order_code }} · Partial shift</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#f6f7f9; margin:0; padding:28px 16px 60px; color:#111827; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  a.back { font-size:13px; color:#4f46e5; text-decoration:none; }
+  h1 { font-size:19px; margin:10px 0 2px; }
+  .meta { font-size:13px; color:#6b7280; margin-bottom:16px; }
+  .meta strong { color:#111827; }
+  .panel { background:#fff; border-radius:12px; padding:20px; box-shadow:0 1px 3px rgba(0,0,0,0.08); margin-bottom:16px; }
+  .err { color:#991b1b; background:#fee2e2; padding:10px 14px; border-radius:8px; font-size:13px; margin-bottom:16px; }
+  h2 { font-size:14px; margin:0 0 4px; }
+  p.hint { font-size:12px; color:#6b7280; margin:0 0 12px; }
+  label { font-size:12px; font-weight:600; color:#374151; }
+  input[type=number] { width:90px; padding:7px 9px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; }
+  input:focus { outline:none; border-color:#4f46e5; }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:6px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #eef0f3; }
+  th { font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:#6b7280; }
+  td.num, th.num { text-align:right; }
+  .short { color:#991b1b; }
+  .or { text-align:center; color:#9ca3af; font-size:12px; font-weight:600; margin:14px 0; }
+  button { padding:11px 20px; background:#111827; color:#fff; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
+  button:hover { background:#1f2937; }
+  .totals { font-size:13px; color:#374151; margin-bottom:6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="/?facility=saleorderswitch">← Back to orders</a>
+  <h1>Shift order {{ order.displayOrderCode or order_code if order else order_code }}</h1>
+
+  {% if order %}
+  <div class="meta">
+    Code <strong>{{ order.code }}</strong> · Channel <strong>{{ order.channel or '—' }}</strong>
+    · Status <strong>{{ order.status or '—' }}</strong> · Currently in <strong>{{ order._facility or '—' }}</strong>
+  </div>
+  {% endif %}
+
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+  {% if order %}
+  <div class="totals">
+    Total units ordered: <strong>{{ total_ordered }}</strong> ·
+    Allocatable from {{ main_facility }} now: <strong>{{ total_allocatable }}</strong>
+  </div>
+
+  <form method="post" action="{{ url_for('order_shift', order_code=order_code) }}">
+    <!-- Route 1a: total auto-pick -->
+    <div class="panel">
+      <h2>Option A — Shift a total quantity (auto-pick)</h2>
+      <p class="hint">Enter how many units to shift; the app auto-picks that many <em>allocatable</em> units across SKUs. Max {{ total_allocatable }}.</p>
+      <label>Units to shift: <input type="number" name="auto_total" min="0" max="{{ total_allocatable }}" placeholder="e.g. 1000"></label>
+    </div>
+
+    <div class="or">— OR —</div>
+
+    <!-- Route 1b: per-SKU quantities -->
+    <div class="panel">
+      <h2>Option B — Set quantity per SKU</h2>
+      <p class="hint">Leave the box above blank and set per-SKU amounts here. Each is capped at what's allocatable.</p>
+      <table>
+        <thead>
+          <tr><th>SKU</th><th class="num">Ordered</th><th class="num">Available ({{ main_facility }})</th><th class="num">Allocatable</th><th class="num">Shift qty</th></tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>{{ r.sku }}</td>
+            <td class="num">{{ r.ordered }}</td>
+            <td class="num {% if r.available < r.ordered %}short{% endif %}">{{ r.available }}</td>
+            <td class="num">{{ r.allocatable }}</td>
+            <td class="num"><input type="number" name="qty_{{ r.sku }}" min="0" max="{{ r.allocatable }}" placeholder="0"></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <button type="submit">Shift selected units to {{ main_facility }}</button>
+  </form>
+  {% endif %}
+</div>
+</body>
+</html>
