@@ -24,6 +24,8 @@ the team reaches over a network, it MUST be served over HTTPS — otherwise
 usernames/passwords travel in plaintext. See the deployment note at bottom.
 """
 import os
+import io
+import csv
 import time
 import secrets
 import threading
@@ -35,13 +37,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from flask import (
-    Flask, render_template, request, session, redirect, url_for
+    Flask, render_template, request, session, redirect, url_for, Response
 )
 
 from uniware_client import (
     login as uniware_login,
     refresh as uniware_refresh,
     switch_facility,
+    set_sale_order_priority,
     get_sale_order_items,
     get_sale_order_line_items,
     get_sale_order_full,
@@ -212,6 +215,7 @@ def _build_orders_view(token, active_facility, is_queue, filters):
     """Search + enrich orders for one tab. Returns a cacheable view dict."""
     orders = []
     search_error = None
+    auth_error = False
     if filters["order_code"]:
         # Direct lookup by Uniware sale-order code — finds the exact order in
         # whatever facility it's in (bypasses the 30-cap and display-code match).
@@ -222,6 +226,8 @@ def _build_orders_view(token, active_facility, is_queue, filters):
                 orders = [o]
             else:
                 search_error = f"No order found with sale-order code '{filters['order_code']}'."
+        except UniwareAuthError as e:
+            search_error = str(e); auth_error = True
         except Exception as e:
             search_error = str(e)
     else:
@@ -238,6 +244,8 @@ def _build_orders_view(token, active_facility, is_queue, filters):
             for el in res["elements"]:
                 el["_facility"] = active_facility
                 orders.append(el)
+        except UniwareAuthError as e:
+            search_error = str(e); auth_error = True
         except Exception as e:
             search_error = str(e)
 
@@ -268,6 +276,8 @@ def _build_orders_view(token, active_facility, is_queue, filters):
             if skus:
                 try:
                     inv = get_inventory_snapshot(token, skus, MAIN_FACILITY)
+                except UniwareAuthError as e:
+                    inv_error = str(e); auth_error = True
                 except Exception as e:
                     inv_error = str(e)
             for o in orders:
@@ -306,6 +316,7 @@ def _build_orders_view(token, active_facility, is_queue, filters):
         "status_cols": status_cols,
         "search_error": search_error,
         "inv_error": inv_error,
+        "auth_error": auth_error,
     }
 
 
@@ -347,8 +358,14 @@ def index():
                 view = hit[1]
     if view is None:
         view = _build_orders_view(token, active_facility, is_queue, filters)
-        with _page_lock:
-            _page_cache[cache_key] = (now, view)
+        # A genuine 401 means the token is dead — clear it and re-login cleanly.
+        if view.get("auth_error"):
+            session.clear()
+            return redirect(url_for("login"))
+        # Never cache error pages (avoids serving a stale error / bad-token build).
+        if not view["search_error"] and not view["inv_error"]:
+            with _page_lock:
+                _page_cache[cache_key] = (now, view)
 
     orders = view["orders"]
     status_cols = view["status_cols"]
@@ -363,6 +380,7 @@ def index():
     return render_template(
         "index.html",
         username=session.get("username", ""),
+        active_module="facility",
         channels=channel_options,
         facilities=FACILITIES,
         orders=orders,
@@ -604,6 +622,91 @@ def order_shift(order_code):
 
     return render_template("result.html", target_facility=dest_facility,
                            results=[{"order": order_code, "ok": ok, "count": len(selected), "message": msg}])
+
+
+# ---------------------------------------------------------------------------
+# Module: Order Priority — bulk-set priorities from a CSV
+# ---------------------------------------------------------------------------
+def _parse_priority_csv(raw_text):
+    """Parse an uploaded CSV into [{code, priority(int|None), raw_priority}]."""
+    reader = csv.DictReader(io.StringIO(raw_text))
+    rows = []
+    for r in reader:
+        rr = {(k or "").strip().lower().replace(" ", "_"): (v or "").strip() for k, v in r.items()}
+        code = (rr.get("sale_order_code") or rr.get("saleordercode")
+                or rr.get("order_code") or rr.get("code"))
+        praw = (rr.get("priority") or rr.get("priority_status") or rr.get("priority_number"))
+        if not code:
+            continue
+        try:
+            pri = int(float(praw))
+        except (TypeError, ValueError):
+            pri = None
+        rows.append({"code": code, "priority": pri, "raw_priority": praw or ""})
+    return rows
+
+
+def _apply_priorities(rows, token, facility):
+    def _do(r):
+        if r["priority"] is None:
+            return {"order": r["code"], "priority": r["raw_priority"], "ok": False,
+                    "message": "Invalid priority — must be a whole number (e.g. 1, 2)."}
+        try:
+            res = set_sale_order_priority(r["code"], r["priority"], token, facility)
+            ok = res["successful"]
+            msg = res["message"] or ("OK" if ok else "Failed")
+            if not ok and res.get("errors"):
+                msg = f"{msg}: {res['errors']}"
+        except Exception as e:
+            ok = False
+            msg = str(e)
+        return {"order": r["code"], "priority": r["priority"], "ok": ok, "message": msg}
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        return list(ex.map(_do, rows))
+
+
+@app.route("/priority", methods=["GET", "POST"])
+def priority():
+    token = _current_token()
+    if not token:
+        return redirect(url_for("login"))
+
+    facility = (request.form.get("facility") or request.args.get("facility") or MAIN_FACILITY)
+    results = None
+    error = None
+    if request.method == "POST":
+        f = request.files.get("csv_file")
+        if not f or not f.filename:
+            error = "Please choose a CSV file to upload."
+        else:
+            try:
+                raw = f.read().decode("utf-8-sig", errors="replace")
+                rows = _parse_priority_csv(raw)
+            except Exception as e:
+                rows, error = None, f"Could not read the CSV: {e}"
+            if rows is not None:
+                if not rows:
+                    error = "No valid rows found. The file needs columns: sale_order_code, priority."
+                else:
+                    results = _apply_priorities(rows, token, facility)
+
+    return render_template(
+        "priority.html",
+        username=session.get("username", ""),
+        active_module="priority",
+        facilities=FACILITIES,
+        facility=facility,
+        results=results,
+        error=error,
+    )
+
+
+@app.route("/priority/template")
+def priority_template():
+    csv_text = "sale_order_code,priority\nSO-EXAMPLE-1,1\nSO-EXAMPLE-2,2\n"
+    return Response(csv_text, mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=orderly_priority_template.csv"})
 
 
 if __name__ == "__main__":

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Order Priority · Orderly</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v=3">
+</head>
+<body>
+<div class="wrap" style="max-width:860px;">
+  <div class="who">
+    <span class="brand"><span class="logo">O</span> Orderly</span>
+    <span class="right">Signed in as <strong>{{ username }}</strong> · <a href="{{ url_for('logout') }}">Log out</a></span>
+  </div>
+  <nav class="modnav">
+    <a href="/" class="{% if active_module == 'facility' %}active{% endif %}">Switch Facility</a>
+    <a href="{{ url_for('priority') }}" class="{% if active_module == 'priority' %}active{% endif %}">Order Priority</a>
+  </nav>
+
+  <span class="badge">BULK PRIORITY · CSV IMPORT</span>
+  <h1>Order Priority</h1>
+  <p class="sub">Upload a CSV of orders with the priority you want, and Orderly sets it on each one in Uniware (higher number = higher priority).</p>
+
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+  <div class="panel">
+    <form method="post" action="{{ url_for('priority') }}" enctype="multipart/form-data">
+      <div style="display:flex; gap:18px; flex-wrap:wrap; align-items:end;">
+        <div>
+          <label>Facility</label>
+          <select name="facility">
+            {% for f in facilities %}
+            <option value="{{ f.code }}" {% if facility == f.code %}selected{% endif %}>{{ f.code }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="flex:1; min-width:260px;">
+          <label>CSV file</label>
+          <input type="file" name="csv_file" accept=".csv" required>
+        </div>
+        <button type="submit">Apply priorities</button>
+      </div>
+    </form>
+    <p class="hint" style="margin-top:14px;">
+      CSV needs two columns: <strong>sale_order_code</strong> and <strong>priority</strong> (a whole number like 1, 2, 3).
+      <a href="{{ url_for('priority_template') }}">Download a sample template</a>.
+    </p>
+  </div>
+
+  {% if results is not none %}
+    {% set ok_count = results | selectattr('ok') | list | length %}
+    <div class="panel">
+      <div class="summary"><strong>{{ ok_count }}</strong> of <strong>{{ results|length }}</strong> orders updated successfully.</div>
+      <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr><th>Order</th><th class="num">Priority</th><th>Result</th><th>Message</th></tr>
+        </thead>
+        <tbody>
+          {% for r in results %}
+          <tr>
+            <td>{{ r.order }}</td>
+            <td class="num">{{ r.priority }}</td>
+            <td>{% if r.ok %}<span class="ok">✓ OK</span>{% else %}<span class="fail">✗ Fail</span>{% endif %}</td>
+            <td>{{ r.message }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  {% endif %}
+</div>
+</body>
+</html>

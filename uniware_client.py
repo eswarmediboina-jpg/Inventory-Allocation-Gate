@@ -151,10 +151,10 @@ def search_sale_orders(
     if facility_code:
         headers["Facility"] = facility_code
     resp = requests.post(url, headers=headers, json=body, timeout=60)
+    if resp.status_code == 401:
+        raise UniwareAuthError("Your session has expired. Please log out and log in again.")
     if resp.status_code != 200:
-        raise UniwareConfigError(
-            f"Order search failed (HTTP {resp.status_code}): {(resp.text or '')[:300]}"
-        )
+        raise UniwareConfigError(f"Order search failed (HTTP {resp.status_code}).")
     data = resp.json()
     if data.get("successful") is False:
         raise UniwareConfigError(
@@ -304,10 +304,10 @@ def get_inventory_snapshot(access_token: str, skus: list, facility_code: str) ->
     }
     # Snapshot API accepts up to 10k SKUs per call; we're well under that.
     resp = requests.post(url, headers=headers, json={"itemTypeSKUs": skus}, timeout=60)
+    if resp.status_code == 401:
+        raise UniwareAuthError("Your session has expired. Please log out and log in again.")
     if resp.status_code != 200:
-        raise UniwareConfigError(
-            f"Inventory snapshot failed (HTTP {resp.status_code}): {(resp.text or '')[:200]}"
-        )
+        raise UniwareConfigError(f"Inventory snapshot failed (HTTP {resp.status_code}).")
     data = resp.json()
     out = {}
     for snap in (data.get("inventorySnapshots") or []):
@@ -318,6 +318,40 @@ def get_inventory_snapshot(access_token: str, skus: list, facility_code: str) ->
                 "blocked": snap.get("inventoryBlocked"),
             }
     return out
+
+
+def set_sale_order_priority(sale_order_code: str, priority: int, access_token: str, facility_code: str) -> dict:
+    """
+    Set an order's processing priority (higher int = higher priority) via
+    Uniware's Set Sale Order Priority API.
+    Returns {"successful": bool, "message": str, "errors": [...]}.
+    """
+    if not access_token:
+        raise UniwareAuthError("Not logged in. Please log in again.")
+    if not sale_order_code:
+        raise UniwareConfigError("Missing sale order code.")
+    url = f"{UNIWARE_BASE_URL}/services/rest/v1/oms/saleOrder/setPriority"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"bearer {access_token}",
+    }
+    if facility_code:
+        headers["Facility"] = facility_code
+    resp = requests.post(
+        url, headers=headers,
+        json={"saleOrderCode": sale_order_code, "priority": int(priority)},
+        timeout=30,
+    )
+    if resp.status_code == 401:
+        raise UniwareAuthError("Your session has expired. Please log out and log in again.")
+    if resp.status_code != 200:
+        raise UniwareConfigError(f"Set priority failed (HTTP {resp.status_code}).")
+    data = resp.json() or {}
+    return {
+        "successful": bool(data.get("successful")),
+        "message": data.get("message") or "",
+        "errors": data.get("errors"),
+    }
 
 
 def switch_facility(

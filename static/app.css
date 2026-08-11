@@ -137,6 +137,16 @@ a.back:hover { text-decoration: underline; }
   margin-bottom: 16px; white-space: pre-wrap;
 }
 
+/* ---- Module nav (top-level sections) ---- */
+.modnav { display: flex; gap: 8px; margin: 8px 0 2px; }
+.modnav a {
+  padding: 8px 16px; font-size: 12.5px; font-weight: 600; letter-spacing: .02em;
+  color: var(--text-mut); text-decoration: none;
+  border: 1px solid var(--border); border-radius: 2px; background: #fff;
+}
+.modnav a:hover { color: var(--text); border-color: var(--border-strong); }
+.modnav a.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
 /* ---- Tabs ---- */
 .tabs { display: flex; gap: 6px; margin: 20px 0 0; border-bottom: 1px solid var(--border); }
 .tabs a {

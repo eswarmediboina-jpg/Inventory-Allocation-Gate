@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Orderly · Facility Switch Gate</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v=2">
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v=3">
 </head>
 <body>
 <div class="wrap">
@@ -11,6 +11,10 @@
     <span class="brand"><span class="logo">O</span> Orderly</span>
     <span class="right">Signed in as <strong>{{ username }}</strong> · <a href="{{ url_for('logout') }}">Log out</a></span>
   </div>
+  <nav class="modnav">
+    <a href="/" class="{% if active_module == 'facility' %}active{% endif %}">Switch Facility</a>
+    <a href="{{ url_for('priority') }}" class="{% if active_module == 'priority' %}active{% endif %}">Order Priority</a>
+  </nav>
   <span class="badge">PHASE 0 · NO RULES ENFORCED</span>
   <h1>Orders — Switch Facility</h1>
   <p class="sub">Browse orders in Uniware, select the ones you want, and switch them. Every switch is logged.</p>
