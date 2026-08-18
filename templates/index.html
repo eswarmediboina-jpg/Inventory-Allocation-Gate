@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <title>Orderly · Facility Switch Gate</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v=3">
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v=4">
 </head>
-<body>
+<body data-facility="{{ tab }}" data-queue="{% if is_queue %}1{% else %}0{% endif %}">
+<div id="ov"><div class="spin"></div><span>Working…</span></div>
 <div class="wrap">
   <div class="who">
     <span class="brand"><span class="logo">O</span> Orderly</span>
@@ -68,9 +69,6 @@
   {% if search_error %}
     <div class="err">Search error: {{ search_error }}</div>
   {% endif %}
-  {% if inv_error %}
-    <div class="err">Live inventory lookup issue: {{ inv_error }}</div>
-  {% endif %}
 
   <!-- Results + switch -->
   <div class="panel">
@@ -100,35 +98,19 @@
             <th>Order date</th>
             <th>Status</th>
             <th>Current facility</th>
-            {% if is_queue %}
-            <th class="stockcol">Allocatable now (live)</th>
-            {% else %}
-            <th>Units</th>
-            {% for s in status_cols %}<th>{{ s }}</th>{% endfor %}
-            {% endif %}
+            <th class="stockcol">{% if is_queue %}Allocatable now (live){% else %}Item status (live){% endif %}</th>
           </tr>
         </thead>
         <tbody>
           {% for o in orders %}
-          <tr>
+          <tr data-code="{{ o.code }}">
             <td><input type="checkbox" name="selected" value="{{ o.code }}|{{ o._facility }}"></td>
             <td><a href="{{ url_for('order_detail', order_code=o.code, facility=o._facility) }}">{{ o.displayOrderCode or o.code }}</a><br><code>{{ o.code }}</code></td>
             <td>{{ o.channel or "—" }}</td>
             <td>{{ o.displayOrderDateTime or o.created or "—" }}</td>
             <td>{{ o.status or "—" }}</td>
             <td><span class="fac {{ o._facility }}">{{ o._facility }}</span></td>
-            {% if is_queue %}
-            <td class="stockcol">
-              {% set alloc = o._allocatable if o._allocatable is not none else 0 %}
-              {% set ordered = o._ordered or 0 %}
-              <span class="alloc {% if ordered > 0 and alloc >= ordered %}ok{% elif alloc > 0 %}part{% else %}none{% endif %}">{{ alloc }} / {{ ordered }} units</span>
-            </td>
-            {% else %}
-            <td><strong>{{ o._ordered or 0 }}</strong></td>
-            {% for s in status_cols %}
-            <td>{% set c = o._status_summary.get(s, 0) %}{% if c %}{{ c }}{% else %}<span class="muted">·</span>{% endif %}</td>
-            {% endfor %}
-            {% endif %}
+            <td class="stockcol extra"><span class="muted">loading…</span></td>
           </tr>
           {% endfor %}
         </tbody>
@@ -140,5 +122,48 @@
     </form>
   </div>
 </div>
+<script>
+(function () {
+  var ov = document.getElementById('ov');
+  function show() { if (ov) ov.classList.add('on'); }
+  // Spinner on any navigation so it's never ambiguous whether it's working.
+  document.querySelectorAll('form').forEach(function (f) { f.addEventListener('submit', show); });
+  document.querySelectorAll('.modnav a, .tabs a, a.reset, a.refreshlink, tbody a')
+    .forEach(function (a) { a.addEventListener('click', show); });
+
+  // Fill the live column in the background so Search/filters return instantly.
+  var rows = Array.prototype.slice.call(document.querySelectorAll('tr[data-code]'));
+  if (!rows.length) return;
+  var facility = document.body.getAttribute('data-facility');
+  var isQueue = document.body.getAttribute('data-queue') === '1';
+  var codes = rows.map(function (r) { return r.getAttribute('data-code'); });
+  fetch('{{ url_for("enrich") }}', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ facility: facility, codes: codes })
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var res = (d && d.results) || {};
+      rows.forEach(function (r) {
+        var cell = r.querySelector('.extra');
+        if (!cell) return;
+        var info = res[r.getAttribute('data-code')];
+        if (!info) { cell.innerHTML = '<span class="muted">—</span>'; return; }
+        if (isQueue) {
+          var a = info.allocatable || 0, o = info.ordered || 0;
+          var cls = (o > 0 && a >= o) ? 'ok' : (a > 0 ? 'part' : 'none');
+          cell.innerHTML = '<span class="alloc ' + cls + '">' + a + ' / ' + o + ' units</span>';
+        } else {
+          var st = info.statuses || {};
+          var parts = Object.keys(st).map(function (k) { return '<strong>' + st[k] + '</strong> ' + k; });
+          cell.innerHTML = '<span class="ssum">' + (parts.length ? parts.join(' · ') : '—') + '</span>';
+        }
+      });
+    })
+    .catch(function () {
+      rows.forEach(function (r) { var c = r.querySelector('.extra'); if (c) c.innerHTML = '<span class="muted">—</span>'; });
+    });
+})();
+</script>
 </body>
 </html>

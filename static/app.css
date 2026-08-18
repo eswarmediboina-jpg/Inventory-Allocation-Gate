@@ -137,6 +137,16 @@ a.back:hover { text-decoration: underline; }
   margin-bottom: 16px; white-space: pre-wrap;
 }
 
+/* ---- Loading overlay ---- */
+#ov { display: none; position: fixed; inset: 0; z-index: 100;
+  background: rgba(252,247,243,.72); backdrop-filter: blur(1px);
+  align-items: center; justify-content: center; flex-direction: column; gap: 14px; }
+#ov.on { display: flex; }
+#ov span { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--primary); }
+.spin { width: 36px; height: 36px; border: 3px solid #e0e5e4; border-top-color: var(--primary);
+  border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* ---- Module nav (top-level sections) ---- */
 .modnav { display: flex; gap: 8px; margin: 8px 0 2px; }
 .modnav a {

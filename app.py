@@ -249,75 +249,71 @@ def _build_orders_view(token, active_facility, is_queue, filters):
         except Exception as e:
             search_error = str(e)
 
-    inv_error = None
-    status_cols = []
-    if orders:
-        def _load(o):
-            if o.get("_items") is not None:
-                return o["_items"]  # already fetched (direct code lookup)
-            try:
-                return _cached_line_items(o["code"], token, o.get("_facility"))
-            except Exception:
-                return []
-        try:
-            with ThreadPoolExecutor(max_workers=24) as ex:
-                per_order_items = list(ex.map(_load, orders))
-        except Exception:
-            per_order_items = [[] for _ in orders]
-        for o, items in zip(orders, per_order_items):
-            # An order can be split across facilities after a partial shift;
-            # keep only the items currently in THIS tab's facility.
-            o["_items"] = [it for it in items if (it.get("facility") or active_facility) == active_facility]
-            o["_ordered"] = len(o["_items"])  # units = item codes in this facility
-
-        if is_queue:
-            skus = sorted({it["sku"] for o in orders for it in o["_items"] if it.get("sku")})
-            inv = {}
-            if skus:
-                try:
-                    inv = get_inventory_snapshot(token, skus, MAIN_FACILITY)
-                except UniwareAuthError as e:
-                    inv_error = str(e); auth_error = True
-                except Exception as e:
-                    inv_error = str(e)
-            for o in orders:
-                demand = {}
-                for it in o["_items"]:
-                    sku = it.get("sku")
-                    if sku:
-                        demand[sku] = demand.get(sku, 0) + 1
-                allocatable = 0
-                for sku, dem in demand.items():
-                    avail = inv.get(sku, {}).get("available") or 0
-                    try:
-                        avail = int(avail)
-                    except (TypeError, ValueError):
-                        avail = 0
-                    allocatable += min(dem, max(avail, 0))
-                o["_allocatable"] = allocatable
-        else:
-            seen = set()
-            for o in orders:
-                counts = {}
-                for it in o["_items"]:
-                    s = it.get("status") or "—"
-                    counts[s] = counts.get(s, 0) + 1
-                    seen.add(s)
-                o["_status_summary"] = counts
-            status_cols = sorted(seen)
-
     with _channels_lock:
         for o in orders:
             if o.get("channel"):
                 _channels_seen.add(o["channel"])
 
+    # NOTE: per-order stock / allocatable / item-status is NOT computed here —
+    # it's loaded asynchronously by /enrich after the page renders, so Search
+    # and filters return instantly instead of waiting on dozens of API calls.
     return {
         "orders": orders,
-        "status_cols": status_cols,
         "search_error": search_error,
-        "inv_error": inv_error,
         "auth_error": auth_error,
     }
+
+
+def _enrich_orders(token, facility, codes):
+    """Heavy per-order work for /enrich: fetch items (cached, parallel), then
+    compute allocatable (queue) or item-status counts (main). Returns
+    {code: {ordered, allocatable}} or {code: {ordered, statuses}}."""
+    is_queue = (facility != MAIN_FACILITY)
+
+    def _load(code):
+        try:
+            items = _cached_line_items(code, token, facility)
+        except Exception:
+            items = []
+        return [it for it in items if (it.get("facility") or facility) == facility]
+
+    items_by_code = {}
+    if codes:
+        with ThreadPoolExecutor(max_workers=12) as ex:
+            for code, its in zip(codes, ex.map(_load, codes)):
+                items_by_code[code] = its
+
+    out = {}
+    if is_queue:
+        skus = sorted({it["sku"] for its in items_by_code.values() for it in its if it.get("sku")})
+        inv = {}
+        if skus:
+            try:
+                inv = get_inventory_snapshot(token, skus, MAIN_FACILITY)
+            except Exception:
+                inv = {}
+        for code, its in items_by_code.items():
+            demand = {}
+            for it in its:
+                if it.get("sku"):
+                    demand[it["sku"]] = demand.get(it["sku"], 0) + 1
+            alloc = 0
+            for sku, dem in demand.items():
+                a = inv.get(sku, {}).get("available") or 0
+                try:
+                    a = max(int(a), 0)
+                except (TypeError, ValueError):
+                    a = 0
+                alloc += min(dem, a)
+            out[code] = {"ordered": len(its), "allocatable": alloc}
+    else:
+        for code, its in items_by_code.items():
+            counts = {}
+            for it in its:
+                s = it.get("status") or "—"
+                counts[s] = counts.get(s, 0) + 1
+            out[code] = {"ordered": len(its), "statuses": counts}
+    return out
 
 
 @app.route("/", methods=["GET"])
@@ -363,14 +359,12 @@ def index():
             session.clear()
             return redirect(url_for("login"))
         # Never cache error pages (avoids serving a stale error / bad-token build).
-        if not view["search_error"] and not view["inv_error"]:
+        if not view["search_error"]:
             with _page_lock:
                 _page_cache[cache_key] = (now, view)
 
     orders = view["orders"]
-    status_cols = view["status_cols"]
     search_error = view["search_error"]
-    inv_error = view["inv_error"]
 
     with _channels_lock:
         if filters["channel"]:
@@ -385,13 +379,27 @@ def index():
         facilities=FACILITIES,
         orders=orders,
         search_error=search_error,
-        inv_error=inv_error,
         main_facility=MAIN_FACILITY,
         tab=active_facility,
         is_queue=is_queue,
-        status_cols=status_cols,
         filters=filters,
     )
+
+
+@app.route("/enrich", methods=["POST"])
+def enrich():
+    """Background enrichment for the order list (stock/allocatable/status)."""
+    token = _current_token()
+    if not token:
+        return {"error": "auth"}, 401
+    data = request.get_json(silent=True) or {}
+    facility = data.get("facility") or MAIN_FACILITY
+    codes = [c for c in (data.get("codes") or []) if c][:60]
+    try:
+        results = _enrich_orders(token, facility, codes)
+    except Exception as e:
+        return {"error": str(e), "results": {}}
+    return {"queue": facility != MAIN_FACILITY, "results": results}
 
 
 @app.route("/switch", methods=["POST"])
