@@ -782,6 +782,32 @@ def priority():
     )
 
 
+@app.route("/debug/order/<path:code>")
+def debug_order(code):
+    """Temporary diagnostic: show an order's items and which facility each is in."""
+    token = _current_token()
+    if not token:
+        return redirect(url_for("login"))
+    try:
+        o = get_sale_order_full(code, token)
+    except Exception as e:
+        return {"error": str(e)}
+    if not o:
+        return {"error": "Order not found (Uniware get returned nothing for this code)."}
+    items = o.get("_items", [])
+    return {
+        "code": o.get("code"),
+        "channel": o.get("channel"),
+        "status": o.get("status"),
+        "item_count": len(items),
+        "facilities_present": sorted({(it.get("facility") or "(blank)") for it in items}),
+        "items_sample": [
+            {"sku": it.get("sku"), "facility": it.get("facility"), "status": it.get("status")}
+            for it in items[:20]
+        ],
+    }
+
+
 @app.route("/priority/template")
 def priority_template():
     csv_text = "sale_order_code,priority\nSO-EXAMPLE-1,1\nSO-EXAMPLE-2,2\n"
