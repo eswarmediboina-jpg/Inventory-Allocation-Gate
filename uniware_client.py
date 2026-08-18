@@ -354,24 +354,11 @@ def set_sale_order_priority(sale_order_code: str, priority: int, access_token: s
     }
 
 
-def switch_facility(
-    sale_order_code: str,
-    item_codes: list,
-    facility_code: str,
-    access_token: str,
-) -> dict:
-    """
-    Move the given sale order item(s) into `facility_code`, authenticating
-    as the logged-in user (their `access_token` from the session).
+_SWITCH_BATCH_SIZE = 200
 
-    Returns the parsed JSON response from Uniware:
-      {"successful": bool, "message": str, "errors": [...], "warnings": [...]}
-    """
-    if not access_token:
-        raise UniwareAuthError("Not logged in. Please log in again.")
-    if not facility_code:
-        raise UniwareConfigError("No target facility code provided.")
 
+def _switch_batch(sale_order_code, item_codes, facility_code, access_token):
+    """One switch API call for up to a few hundred item codes."""
     url = f"{UNIWARE_BASE_URL}/services/rest/v1/oms/saleorder/facility/switch"
     headers = {
         "Content-Type": "application/json",
@@ -387,7 +374,51 @@ def switch_facility(
         "saleOrderCode": sale_order_code,
         "saleOrderItemCodes": item_codes,
     }
-
-    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    resp = requests.post(url, headers=headers, json=payload, timeout=90)
+    if resp.status_code == 401:
+        raise UniwareAuthError("Your session has expired. Please log out and log in again.")
     resp.raise_for_status()
     return resp.json()
+
+
+def switch_facility(
+    sale_order_code: str,
+    item_codes: list,
+    facility_code: str,
+    access_token: str,
+) -> dict:
+    """
+    Move the given sale order item(s) into `facility_code`. Large lists are
+    split into batches so a big order (e.g. 1000+ units) doesn't exceed the
+    request timeout — each batch is a separate switch call.
+
+    Returns {"successful": bool, "message": str, "errors": [...]}.
+    """
+    if not access_token:
+        raise UniwareAuthError("Not logged in. Please log in again.")
+    if not facility_code:
+        raise UniwareConfigError("No target facility code provided.")
+
+    codes = list(item_codes or [])
+    if len(codes) <= _SWITCH_BATCH_SIZE:
+        return _switch_batch(sale_order_code, codes, facility_code, access_token)
+
+    total = len(codes)
+    switched = 0
+    fails = []
+    batches = (total + _SWITCH_BATCH_SIZE - 1) // _SWITCH_BATCH_SIZE
+    for i in range(0, total, _SWITCH_BATCH_SIZE):
+        batch = codes[i:i + _SWITCH_BATCH_SIZE]
+        try:
+            res = _switch_batch(sale_order_code, batch, facility_code, access_token)
+            if res.get("successful"):
+                switched += len(batch)
+            else:
+                fails.append(res.get("message") or str(res.get("errors")) or "batch failed")
+        except Exception as e:
+            fails.append(str(e))
+    ok = (switched == total)
+    msg = f"Switched {switched} of {total} units (in {batches} batches)."
+    if fails:
+        msg += " Issues: " + "; ".join(fails[:3])
+    return {"successful": ok, "message": msg, "errors": fails}
