@@ -21,6 +21,10 @@ zouk-wh-*.json
 *.pem
 *.key
 
+# --- Runtime data (generated on the server) ---
+channels.json
+channels.json.tmp
+
 # --- Python ---
 __pycache__/
 *.py[cod]

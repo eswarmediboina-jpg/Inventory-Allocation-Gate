@@ -26,6 +26,7 @@ usernames/passwords travel in plaintext. See the deployment note at bottom.
 import os
 import io
 import csv
+import json
 import time
 import secrets
 import threading
@@ -94,26 +95,79 @@ _ITEMS_TTL = 180
 _items_cache = {}
 _items_lock = threading.Lock()
 
-# Authoritative Uniware channel codes — the dropdown's source of truth.
-CHANNELS = [
-    "FLIPKART_SOR_OR_", "MYNTRA_SOR", "COCOBLU_OR", "AMAZON_RETAIL_EZ_", "AJIO_OR",
-    "ZEPTO_MANUAL", "BLINKIT_MANUAL", "ZOUK_EBO", "INSTAMART_MANUAL_2", "ZOUK_EBO_MANUAL",
-    "MYNTRA_MNOW", "COCOBLU_NOW_", "SLIKK_B2B", "SCAPIA", "SHOPPERSSTOP",
-    "THE_CHENNAI_SILK", "BULK_OFFLINE", "ZEPTO", "AMAZON_RETAIL_EZ-DF_1", "CUSTOM",
-    "STYLE_PLUS_2", "ZOUK_BRAND_MARKETING", "8887_B2B", "WAYPOINT", "MYNTRA_MNOW_B2B",
-    "VENDOR_SAMPLES", "MYNTRA_B2B", "INSTAMART_MANUAL_B2B", "EMAMI_OFFLINE", "EBO_B2B",
-    "COCOBLU_NOW", "8887", "AJIO_OR_B2B", "BULK_OFFLINE_B2B", "COCOBLU_OR_B2B",
-    "AMAZON_RETAIL_EZ", "FLIPKART_B2B", "THE_CHENNAI_SILK_B2B", "CUSTOM_B2B", "INSTAMART",
-    "INSTAMART_B2B", "KNOT", "KLYDO", "MYNTRA_SJIT_B2B", "BLINKIT_B2B",
-    "ZILO_B2B_2", "BLINKIT", "EBO_MAHARASHTRA_B2B", "SCAPIA_OR", "STYLEPLUS_B2B",
-    "SLIKK_B2B_2", "SHOPPERSTOP_B2B", "WAVPOINT_B2B", "ZILO_B2B", "ZEPTO_OR",
-    "ZEPTO_OR_B2B", "ZEPTO_B2B", "STOCK_TRANSFER",
-]
-
-# Any channel codes seen in live orders get unioned in too, so a new channel
-# added in Uniware still shows up without a code change.
+# The channel dropdown shows ONLY channels that actually have orders. We
+# discover them by scanning recent orders across both facilities, persist the
+# result (survives restarts), and refresh it in the background.
 _channels_seen = set()
 _channels_lock = threading.Lock()
+_CHANNELS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "channels.json")
+_HARVEST_TTL = 600
+_last_harvest = 0.0
+
+
+def _load_channels():
+    try:
+        with open(_CHANNELS_FILE) as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            with _channels_lock:
+                _channels_seen.update(x for x in data if x)
+    except Exception:
+        pass
+
+
+def _save_channels():
+    try:
+        with _channels_lock:
+            data = sorted(_channels_seen)
+        tmp = _CHANNELS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, _CHANNELS_FILE)
+    except Exception:
+        pass
+
+
+def _harvest_channels(token, pages=5):
+    """Scan recent orders in both facilities and record channels that have
+    orders. pages*100 orders per facility."""
+    added = False
+    for fac in [f["code"] for f in FACILITIES]:
+        start = 0
+        for _ in range(pages):
+            try:
+                res = search_sale_orders(token, facility_code=fac,
+                                         display_start=start, display_length=100)
+            except Exception:
+                break
+            els = res.get("elements", [])
+            with _channels_lock:
+                for el in els:
+                    ch = el.get("channel")
+                    if ch and ch not in _channels_seen:
+                        _channels_seen.add(ch)
+                        added = True
+            if len(els) < 100:
+                break
+            start += 100
+    if added:
+        _save_channels()
+
+
+def _maybe_harvest(token):
+    """Seed the channel list on first use (quick) and refresh periodically."""
+    global _last_harvest
+    now = time.time()
+    with _channels_lock:
+        empty = not _channels_seen
+    if empty:
+        _harvest_channels(token, pages=1)  # quick synchronous seed
+    if now - _last_harvest >= _HARVEST_TTL:
+        _last_harvest = now
+        threading.Thread(target=lambda: _harvest_channels(token, pages=5), daemon=True).start()
+
+
+_load_channels()
 
 # Cache the fully-built page per (facility + filters) so flipping between tabs
 # is instant. ?refresh=1 rebuilds live; a switch clears it (see below).
@@ -338,6 +392,7 @@ def index():
     token = _current_token()
     if not token:
         return redirect(url_for("login"))
+    _maybe_harvest(token)  # keep the channel list (channels-with-orders) fresh
 
     filters = {
         "channel": request.args.get("channel", "").strip(),
@@ -385,7 +440,7 @@ def index():
     with _channels_lock:
         if filters["channel"]:
             _channels_seen.add(filters["channel"])
-        channel_options = sorted(set(CHANNELS) | _channels_seen)
+        channel_options = sorted(_channels_seen)
 
     return render_template(
         "index.html",
