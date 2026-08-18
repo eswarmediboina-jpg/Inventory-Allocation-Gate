@@ -101,7 +101,7 @@ _items_lock = threading.Lock()
 _channels_seen = set()
 _channels_lock = threading.Lock()
 _CHANNELS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "channels.json")
-_HARVEST_TTL = 600
+_HARVEST_TTL = 1800
 _last_harvest = 0.0
 
 
@@ -164,7 +164,7 @@ def _maybe_harvest(token):
         _harvest_channels(token, pages=1)  # quick synchronous seed
     if now - _last_harvest >= _HARVEST_TTL:
         _last_harvest = now
-        threading.Thread(target=lambda: _harvest_channels(token, pages=5), daemon=True).start()
+        threading.Thread(target=lambda: _harvest_channels(token, pages=2), daemon=True).start()
 
 
 _load_channels()
@@ -349,7 +349,8 @@ def _enrich_orders(token, facility, codes):
 
     items_by_code = {}
     if codes:
-        with ThreadPoolExecutor(max_workers=12) as ex:
+        # Modest concurrency — many parallel calls from one IP get rate-limited.
+        with ThreadPoolExecutor(max_workers=5) as ex:
             for code, its in zip(codes, ex.map(_load, codes)):
                 items_by_code[code] = its
 
@@ -741,7 +742,7 @@ def _apply_priorities(rows, token, facility):
             msg = str(e)
         return {"order": r["code"], "priority": r["priority"], "ok": ok, "message": msg}
 
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    with ThreadPoolExecutor(max_workers=5) as ex:
         return list(ex.map(_do, rows))
 
 

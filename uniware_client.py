@@ -13,6 +13,7 @@ never written to disk — it exists only for the duration of the login call.
 Nothing here reads environment variables. The tenant URL is hardcoded
 below; change it here if the tenant ever changes.
 """
+import time
 import socket
 
 import requests
@@ -38,6 +39,29 @@ class UniwareConfigError(Exception):
 
 class UniwareAuthError(Exception):
     pass
+
+
+# Status codes worth a retry (transient / rate-limit / gateway hiccups).
+_RETRYABLE = {403, 429, 500, 502, 503, 504}
+
+
+def _post_retry(url, headers, json_body, timeout, retries=2, backoff=1.6):
+    """POST with a couple of gentle retries on transient failures / throttling.
+    Only for READ calls — writes must not be blindly retried."""
+    resp = None
+    for attempt in range(retries + 1):
+        try:
+            resp = requests.post(url, headers=headers, json=json_body, timeout=timeout)
+        except (requests.Timeout, requests.ConnectionError):
+            if attempt < retries:
+                time.sleep(backoff * (attempt + 1))
+                continue
+            raise
+        if resp.status_code in _RETRYABLE and attempt < retries:
+            time.sleep(backoff * (attempt + 1))
+            continue
+        return resp
+    return resp
 
 
 def login(username: str, password: str) -> dict:
@@ -150,9 +174,11 @@ def search_sale_orders(
     # even where the docs mark it optional. Send the facility being searched.
     if facility_code:
         headers["Facility"] = facility_code
-    resp = requests.post(url, headers=headers, json=body, timeout=60)
+    resp = _post_retry(url, headers, body, 60)
     if resp.status_code == 401:
         raise UniwareAuthError("Your session has expired. Please log out and log in again.")
+    if resp.status_code == 403:
+        raise UniwareConfigError("Order search blocked (HTTP 403) — likely a temporary Uniware rate-limit, or this account lacks API access. Try again in a moment.")
     if resp.status_code != 200:
         raise UniwareConfigError(f"Order search failed (HTTP {resp.status_code}).")
     data = resp.json()
@@ -187,7 +213,7 @@ def get_sale_order_items(sale_order_code: str, access_token: str, facility_code:
     }
     if facility_code:
         headers["Facility"] = facility_code
-    resp = requests.post(url, headers=headers, json={"code": sale_order_code}, timeout=30)
+    resp = _post_retry(url, headers, {"code": sale_order_code}, 30)
     if resp.status_code != 200:
         raise UniwareConfigError(
             f"Could not fetch order {sale_order_code} "
@@ -223,7 +249,7 @@ def get_sale_order_line_items(sale_order_code: str, access_token: str, facility_
     }
     if facility_code:
         headers["Facility"] = facility_code
-    resp = requests.post(url, headers=headers, json={"code": sale_order_code}, timeout=30)
+    resp = _post_retry(url, headers, {"code": sale_order_code}, 30)
     if resp.status_code != 200:
         raise UniwareConfigError(
             f"Could not fetch order {sale_order_code} (HTTP {resp.status_code})"
@@ -256,7 +282,7 @@ def get_sale_order_full(sale_order_code: str, access_token: str) -> dict:
         "Content-Type": "application/json",
         "Authorization": f"bearer {access_token}",
     }
-    resp = requests.post(url, headers=headers, json={"code": sale_order_code}, timeout=30)
+    resp = _post_retry(url, headers, {"code": sale_order_code}, 30)
     if resp.status_code != 200:
         return None
     dto = (resp.json() or {}).get("saleOrderDTO")
@@ -303,7 +329,7 @@ def get_inventory_snapshot(access_token: str, skus: list, facility_code: str) ->
         "Facility": facility_code,
     }
     # Snapshot API accepts up to 10k SKUs per call; we're well under that.
-    resp = requests.post(url, headers=headers, json={"itemTypeSKUs": skus}, timeout=60)
+    resp = _post_retry(url, headers, {"itemTypeSKUs": skus}, 60)
     if resp.status_code == 401:
         raise UniwareAuthError("Your session has expired. Please log out and log in again.")
     if resp.status_code != 200:
