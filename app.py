@@ -94,8 +94,24 @@ _ITEMS_TTL = 180
 _items_cache = {}
 _items_lock = threading.Lock()
 
-# Real channel codes accumulate here from actual order data (there's no
-# "list channels" API), so the filter dropdown always matches Uniware's codes.
+# Authoritative Uniware channel codes — the dropdown's source of truth.
+CHANNELS = [
+    "FLIPKART_SOR_OR_", "MYNTRA_SOR", "COCOBLU_OR", "AMAZON_RETAIL_EZ_", "AJIO_OR",
+    "ZEPTO_MANUAL", "BLINKIT_MANUAL", "ZOUK_EBO", "INSTAMART_MANUAL_2", "ZOUK_EBO_MANUAL",
+    "MYNTRA_MNOW", "COCOBLU_NOW_", "SLIKK_B2B", "SCAPIA", "SHOPPERSSTOP",
+    "THE_CHENNAI_SILK", "BULK_OFFLINE", "ZEPTO", "AMAZON_RETAIL_EZ-DF_1", "CUSTOM",
+    "STYLE_PLUS_2", "ZOUK_BRAND_MARKETING", "8887_B2B", "WAYPOINT", "MYNTRA_MNOW_B2B",
+    "VENDOR_SAMPLES", "MYNTRA_B2B", "INSTAMART_MANUAL_B2B", "EMAMI_OFFLINE", "EBO_B2B",
+    "COCOBLU_NOW", "8887", "AJIO_OR_B2B", "BULK_OFFLINE_B2B", "COCOBLU_OR_B2B",
+    "AMAZON_RETAIL_EZ", "FLIPKART_B2B", "THE_CHENNAI_SILK_B2B", "CUSTOM_B2B", "INSTAMART",
+    "INSTAMART_B2B", "KNOT", "KLYDO", "MYNTRA_SJIT_B2B", "BLINKIT_B2B",
+    "ZILO_B2B_2", "BLINKIT", "EBO_MAHARASHTRA_B2B", "SCAPIA_OR", "STYLEPLUS_B2B",
+    "SLIKK_B2B_2", "SHOPPERSTOP_B2B", "WAVPOINT_B2B", "ZILO_B2B", "ZEPTO_OR",
+    "ZEPTO_OR_B2B", "ZEPTO_B2B", "STOCK_TRANSFER",
+]
+
+# Any channel codes seen in live orders get unioned in too, so a new channel
+# added in Uniware still shows up without a code change.
 _channels_seen = set()
 _channels_lock = threading.Lock()
 
@@ -369,7 +385,7 @@ def index():
     with _channels_lock:
         if filters["channel"]:
             _channels_seen.add(filters["channel"])
-        channel_options = sorted(_channels_seen)
+        channel_options = sorted(set(CHANNELS) | _channels_seen)
 
     return render_template(
         "index.html",
