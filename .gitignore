@@ -24,6 +24,8 @@ zouk-wh-*.json
 # --- Runtime data (generated on the server) ---
 channels.json
 channels.json.tmp
+access.json
+access.json.tmp
 
 # --- Python ---
 __pycache__/

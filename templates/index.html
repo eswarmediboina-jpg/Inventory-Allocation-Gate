@@ -15,6 +15,7 @@
   <nav class="modnav">
     <a href="/" class="{% if active_module == 'facility' %}active{% endif %}">Switch Facility</a>
     <a href="{{ url_for('priority') }}" class="{% if active_module == 'priority' %}active{% endif %}">Order Priority</a>
+    {% if admin %}<a href="{{ url_for('admin_access') }}" class="{% if active_module == 'admin' %}active{% endif %}">Access control</a>{% endif %}
   </nav>
   <span class="badge">PHASE 0 · NO RULES ENFORCED</span>
   <h1>Orders — Switch Facility</h1>
@@ -74,6 +75,7 @@
   <div class="panel">
     <form method="post" action="{{ url_for('switch_selected') }}">
       <div class="switchbar">
+        {% if can_act %}
         <div>
           <label>Destination facility</label>
           <select name="target_facility" required>
@@ -83,6 +85,9 @@
           </select>
         </div>
         <button type="submit">Switch selected</button>
+        {% else %}
+        <span class="count">👁 View-only — ask an admin for Editor access to switch.</span>
+        {% endif %}
         <span class="count">{{ orders|length }} order(s) shown</span>
         <a class="refreshlink" href="?facility={{ tab | urlencode }}&channel={{ filters.channel | urlencode }}&status={{ filters.status | urlencode }}&from_date={{ filters.from_date | urlencode }}&to_date={{ filters.to_date | urlencode }}&order_code={{ filters.order_code | urlencode }}&refresh=1" title="Reload live data now">↻ Refresh (live)</a>
       </div>
@@ -92,7 +97,7 @@
       <table>
         <thead>
           <tr>
-            <th><input type="checkbox" onclick="for(const c of document.querySelectorAll('input[name=selected]'))c.checked=this.checked"></th>
+            {% if can_act %}<th><input type="checkbox" onclick="for(const c of document.querySelectorAll('input[name=selected]'))c.checked=this.checked"></th>{% endif %}
             <th>Order</th>
             <th>Channel</th>
             <th>Order date</th>
@@ -104,7 +109,7 @@
         <tbody>
           {% for o in orders %}
           <tr data-code="{{ o.code }}">
-            <td><input type="checkbox" name="selected" value="{{ o.code }}|{{ o._facility }}"></td>
+            {% if can_act %}<td><input type="checkbox" name="selected" value="{{ o.code }}|{{ o._facility }}"></td>{% endif %}
             <td><a href="{{ url_for('order_detail', order_code=o.code, facility=o._facility) }}">{{ o.displayOrderCode or o.code }}</a><br><code>{{ o.code }}</code></td>
             <td>{{ o.channel or "—" }}</td>
             <td>{{ o.displayOrderDateTime or o.created or "—" }}</td>

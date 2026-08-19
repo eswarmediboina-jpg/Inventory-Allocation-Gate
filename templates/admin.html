@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Access control · Orderly</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v=4">
+</head>
+<body>
+<div class="wrap" style="max-width:920px;">
+  <div class="who">
+    <span class="brand"><span class="logo">O</span> Orderly</span>
+    <span class="right">Signed in as <strong>{{ username }}</strong> · <a href="{{ url_for('logout') }}">Log out</a></span>
+  </div>
+  <nav class="modnav">
+    <a href="/" class="{% if active_module == 'facility' %}active{% endif %}">Switch Facility</a>
+    <a href="{{ url_for('priority') }}" class="{% if active_module == 'priority' %}active{% endif %}">Order Priority</a>
+    {% if admin %}<a href="{{ url_for('admin_access') }}" class="{% if active_module == 'admin' %}active{% endif %}">Access control</a>{% endif %}
+  </nav>
+
+  {% if forbidden %}
+    <h1>Access control</h1>
+    <div class="err">You need Admin rights to manage access. Ask an admin to grant it.</div>
+  {% else %}
+  <span class="badge">ADMIN · USER ACCESS</span>
+  <h1>Access control</h1>
+  <p class="sub">Set what each user can do, per module. <strong>Editor</strong> can send actions to Uniware; <strong>Viewer</strong> can only view. <strong>Admins</strong> manage access and can do everything. Users you don't list are Viewers by default.</p>
+
+  {% if msg %}<div class="panel" style="border-left:3px solid var(--primary);">{{ msg }}</div>{% endif %}
+
+  <div class="panel">
+    <h2>Add or update a user</h2>
+    <p class="hint">Use the person's Uniware login email. Saving overrides their current access.</p>
+    <form method="post" action="{{ url_for('admin_access') }}">
+      <input type="hidden" name="op" value="save">
+      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:end;">
+        <div style="flex:1; min-width:240px;">
+          <label>User (login email)</label>
+          <input type="text" name="target_user" placeholder="name@zouk.co.in" required>
+        </div>
+        {% for m in modules %}
+        <div>
+          <label>{{ m.label }}</label>
+          <select name="role_{{ m.key }}">
+            <option value="viewer">Viewer</option>
+            <option value="editor">Editor</option>
+          </select>
+        </div>
+        {% endfor %}
+        <div>
+          <label>Admin?</label>
+          <select name="is_admin">
+            <option value="">No</option>
+            <option value="1">Yes</option>
+          </select>
+        </div>
+        <button type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Current users</h2>
+    {% if users %}
+    <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>User</th><th>Admin</th>{% for m in modules %}<th>{{ m.label }}</th>{% endfor %}<th></th></tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td>{{ u.user }}{% if u.bootstrap %} <span class="muted">(permanent)</span>{% endif %}</td>
+          <td>{% if u.admin %}<span class="alloc ok">Admin</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+          {% for m in modules %}
+          <td>{% if u.roles[m.key] == 'editor' %}<strong>Editor</strong>{% else %}<span class="muted">Viewer</span>{% endif %}</td>
+          {% endfor %}
+          <td>
+            {% if not u.bootstrap %}
+            <form method="post" action="{{ url_for('admin_access') }}" onsubmit="return confirm('Remove access for {{ u.user }}? They become a Viewer.');" style="display:inline;">
+              <input type="hidden" name="op" value="remove">
+              <input type="hidden" name="target_user" value="{{ u.user }}">
+              <button type="submit" style="background:#fff;color:var(--dang-tx);border-color:var(--dang-tx);padding:6px 12px;">Remove</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+      <p class="hint">No users configured yet — everyone is a Viewer by default. Add someone above to grant Editor/Admin.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+</body>
+</html>

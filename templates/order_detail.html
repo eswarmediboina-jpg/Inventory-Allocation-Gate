@@ -25,6 +25,9 @@
     {% if committing %}Allocatable to {{ dest_facility }} now: <strong>{{ total_allocatable }}</strong>{% else %}Releasable to {{ dest_facility }}: <strong>{{ total_allocatable }}</strong>{% endif %}
   </div>
 
+  {% if not can_act %}
+  <div class="err">👁 View-only — you can see this order's breakdown but can't shift it. Ask an admin for Editor access to Switch Facility.</div>
+  {% else %}
   <form method="post" action="{{ url_for('order_shift', order_code=order_code) }}">
     <input type="hidden" name="source_facility" value="{{ source_facility }}">
     <!-- Route 1a: total auto-pick -->
@@ -60,7 +63,8 @@
 
     <button type="submit">Shift selected units to {{ dest_facility }}</button>
   </form>
-  {% endif %}
+  {% endif %}{# can_act #}
+  {% endif %}{# order #}
 </div>
 </body>
 </html>

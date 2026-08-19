@@ -169,6 +169,73 @@ def _maybe_harvest(token):
 
 _load_channels()
 
+
+# ---------------------------------------------------------------------------
+# Access control — per-module roles (admin / editor / viewer)
+# ---------------------------------------------------------------------------
+MODULES = [
+    {"key": "facility", "label": "Switch Facility"},
+    {"key": "priority", "label": "Order Priority"},
+]
+_DEFAULT_ROLE = "viewer"
+# Always-admins (bootstrap): can't be locked out even if the file is edited.
+BOOTSTRAP_ADMINS = {"eswar.mediboina@zouk.co.in"}
+
+_ACCESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "access.json")
+_access = {}  # {username_lower: {"admin": bool, "facility": role, "priority": role}}
+_access_lock = threading.Lock()
+
+
+def _norm_user(u):
+    return (u or "").strip().lower()
+
+
+def _load_access():
+    global _access
+    try:
+        with open(_ACCESS_FILE) as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            _access = {_norm_user(k): v for k, v in data.items() if isinstance(v, dict)}
+    except Exception:
+        pass
+
+
+def _save_access():
+    try:
+        with _access_lock:
+            data = dict(_access)
+        tmp = _ACCESS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, _ACCESS_FILE)
+    except Exception:
+        pass
+
+
+def get_access(username):
+    """Effective access: {'admin': bool, 'roles': {module_key: 'editor'|'viewer'}}."""
+    u = _norm_user(username)
+    with _access_lock:
+        entry = dict(_access.get(u, {}))
+    admin = bool(entry.get("admin")) or (u in {_norm_user(a) for a in BOOTSTRAP_ADMINS})
+    roles = {}
+    for m in MODULES:
+        roles[m["key"]] = "editor" if admin else (entry.get(m["key"]) or _DEFAULT_ROLE)
+    return {"admin": admin, "roles": roles}
+
+
+def can_act(username, module_key):
+    """True if the user may send actions to Uniware for this module."""
+    return get_access(username)["roles"].get(module_key) == "editor"
+
+
+def is_admin(username):
+    return get_access(username)["admin"]
+
+
+_load_access()
+
 # Cache the fully-built page per (facility + filters) so flipping between tabs
 # is instant. ?refresh=1 rebuilds live; a switch clears it (see below).
 _PAGE_TTL = 120
@@ -455,6 +522,8 @@ def index():
         tab=active_facility,
         is_queue=is_queue,
         filters=filters,
+        can_act=can_act(session.get("username"), "facility"),
+        admin=is_admin(session.get("username")),
     )
 
 
@@ -480,6 +549,10 @@ def switch_selected():
     token = _current_token()
     if not token:
         return redirect(url_for("login"))
+    if not can_act(session.get("username"), "facility"):
+        return render_template("result.html", target_facility="", results=[{
+            "order": "—", "ok": False, "count": 0,
+            "message": "You have view-only access to Switch Facility. Ask an admin for Editor access."}])
 
     target_facility = request.form.get("target_facility", "").strip()
     selected = request.form.getlist("selected")  # each = "orderCode|currentFacility"
@@ -632,6 +705,7 @@ def order_detail(order_code):
         committing=committing,
         main_facility=MAIN_FACILITY,
         error=error,
+        can_act=can_act(session.get("username"), "facility"),
     )
 
 
@@ -641,6 +715,10 @@ def order_shift(order_code):
     token = _current_token()
     if not token:
         return redirect(url_for("login"))
+    if not can_act(session.get("username"), "facility"):
+        return render_template("result.html", target_facility="", results=[{
+            "order": order_code, "ok": False, "count": 0,
+            "message": "You have view-only access to Switch Facility. Ask an admin for Editor access."}])
 
     source_facility = request.form.get("source_facility", "").strip() or "saleorderswitch"
     dest_facility, committing = _shift_dirn(source_facility)
@@ -753,23 +831,27 @@ def priority():
         return redirect(url_for("login"))
 
     facility = (request.form.get("facility") or request.args.get("facility") or MAIN_FACILITY)
+    may_act = can_act(session.get("username"), "priority")
     results = None
     error = None
     if request.method == "POST":
-        f = request.files.get("csv_file")
-        if not f or not f.filename:
-            error = "Please choose a CSV file to upload."
+        if not may_act:
+            error = "You have view-only access to Order Priority. Ask an admin for Editor access."
         else:
-            try:
-                raw = f.read().decode("utf-8-sig", errors="replace")
-                rows = _parse_priority_csv(raw)
-            except Exception as e:
-                rows, error = None, f"Could not read the CSV: {e}"
-            if rows is not None:
-                if not rows:
-                    error = "No valid rows found. The file needs columns: sale_order_code, priority."
-                else:
-                    results = _apply_priorities(rows, token, facility)
+            f = request.files.get("csv_file")
+            if not f or not f.filename:
+                error = "Please choose a CSV file to upload."
+            else:
+                try:
+                    raw = f.read().decode("utf-8-sig", errors="replace")
+                    rows = _parse_priority_csv(raw)
+                except Exception as e:
+                    rows, error = None, f"Could not read the CSV: {e}"
+                if rows is not None:
+                    if not rows:
+                        error = "No valid rows found. The file needs columns: sale_order_code, priority."
+                    else:
+                        results = _apply_priorities(rows, token, facility)
 
     return render_template(
         "priority.html",
@@ -779,6 +861,8 @@ def priority():
         facility=facility,
         results=results,
         error=error,
+        can_act=may_act,
+        admin=is_admin(session.get("username")),
     )
 
 
@@ -813,6 +897,56 @@ def priority_template():
     csv_text = "sale_order_code,priority\nSO-EXAMPLE-1,1\nSO-EXAMPLE-2,2\n"
     return Response(csv_text, mimetype="text/csv",
                     headers={"Content-Disposition": "attachment; filename=orderly_priority_template.csv"})
+
+
+@app.route("/admin/access", methods=["GET", "POST"])
+def admin_access():
+    """Admin-only: manage per-module roles for users."""
+    if not _current_token():
+        return redirect(url_for("login"))
+    me = session.get("username")
+    if not is_admin(me):
+        return render_template("admin.html", username=me, active_module="admin",
+                               admin=False, forbidden=True, modules=MODULES, users=[], msg=None)
+
+    msg = None
+    if request.method == "POST":
+        op = request.form.get("op")
+        target = _norm_user(request.form.get("target_user"))
+        if not target:
+            msg = "Enter a user's login email."
+        elif op == "remove":
+            if target in {_norm_user(a) for a in BOOTSTRAP_ADMINS}:
+                msg = f"{target} is a permanent admin and can't be removed."
+            else:
+                with _access_lock:
+                    _access.pop(target, None)
+                _save_access()
+                msg = f"Removed {target} (back to Viewer)."
+        else:  # save / update
+            entry = {"admin": bool(request.form.get("is_admin"))}
+            for m in MODULES:
+                entry[m["key"]] = "editor" if request.form.get("role_" + m["key"]) == "editor" else "viewer"
+            with _access_lock:
+                _access[target] = entry
+            _save_access()
+            msg = f"Saved access for {target}."
+
+    with _access_lock:
+        stored = sorted(_access.keys())
+    users = []
+    seen = set()
+    for uname in stored:
+        acc = get_access(uname)
+        users.append({"user": uname, "admin": acc["admin"], "roles": acc["roles"], "bootstrap": False})
+        seen.add(uname)
+    for b in BOOTSTRAP_ADMINS:
+        bn = _norm_user(b)
+        if bn not in seen:
+            users.append({"user": bn, "admin": True, "roles": get_access(bn)["roles"], "bootstrap": True})
+
+    return render_template("admin.html", username=me, active_module="admin",
+                           admin=True, forbidden=False, modules=MODULES, users=users, msg=msg)
 
 
 if __name__ == "__main__":
